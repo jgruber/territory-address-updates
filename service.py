@@ -1,0 +1,434 @@
+#!/usr/bin/env python3
+"""
+service.py  –  Territory Address Update REST API
+
+Start with:
+    uvicorn service:app --host 0.0.0.0 --port 8000
+
+Endpoints
+---------
+GET  /                          Service status and file readiness
+GET  /users                     List usernames
+POST /users                     Create a user  { "username": "...", "password": "..." }
+PUT  /users/{username}/password Change a password  { "password": "..." }
+DEL  /users/{username}          Delete a user
+
+POST /upload/shapefile          Upload the parcel shapefile ZIP
+POST /upload/territories        Upload Territories.csv
+POST /upload/addresses          Upload TerritoryAddresses.csv
+GET  /upload/status             Show which files are present
+
+POST /update                    Start the update job (runs in background)
+GET  /update/status             Poll job status and view log
+
+GET  /download/addresses        Download the updated TerritoryAddresses.csv
+GET  /download/report           Download the latest update report CSV
+
+DELETE /files                   Delete all uploaded files and reports
+
+GET  /query/street?q=...        Search the shapefile for a street name
+                                  e.g. ?q=Jupiter+Rd  or  ?q=Edgewood+Ln,+Allen
+"""
+
+import asyncio
+import io
+import json
+import os
+import subprocess
+import sys
+import threading
+from datetime import datetime
+from typing import Optional
+
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from passlib.context import CryptContext
+from pydantic import BaseModel
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+BASE      = os.path.dirname(os.path.abspath(__file__))
+NWS_DIR   = os.path.join(BASE, "data", "NWS")
+CAD_DIR   = os.path.join(BASE, "data", "CAD")
+
+USERS_FILE       = os.path.join(BASE, "users.json")
+TERRITORIES_CSV  = os.path.join(NWS_DIR, "Territories.csv")
+ADDRESSES_CSV    = os.path.join(NWS_DIR, "TerritoryAddresses.csv")
+SHAPEFILE_ZIP    = os.path.join(CAD_DIR,  "parcels_with_appraisal_data_R5.zip")
+UPDATE_SCRIPT    = os.path.join(BASE, "update_territory_addresses.py")
+
+# ---------------------------------------------------------------------------
+# Password hashing
+# ---------------------------------------------------------------------------
+pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+def _load_users() -> dict:
+    if os.path.exists(USERS_FILE):
+        with open(USERS_FILE) as f:
+            return json.load(f)
+    return {}
+
+
+def _save_users(users: dict) -> None:
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f, indent=2)
+
+
+def _init_users() -> None:
+    """Create users.json with the default admin account if it doesn't exist."""
+    if not os.path.exists(USERS_FILE):
+        _save_users({"admin": pwd_ctx.hash("changeme")})
+
+
+_init_users()
+
+# ---------------------------------------------------------------------------
+# Authentication
+# ---------------------------------------------------------------------------
+security = HTTPBasic()
+
+
+def authenticate(credentials: HTTPBasicCredentials = Depends(security)) -> str:
+    """Validate HTTP Basic credentials and return the authenticated username."""
+    users = _load_users()
+    user = credentials.username
+    if user not in users or not pwd_ctx.verify(credentials.password, users[user]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return user
+
+
+# ---------------------------------------------------------------------------
+# Update job state
+# ---------------------------------------------------------------------------
+class _UpdateState:
+    def __init__(self):
+        self.status: str = "idle"        # idle | running | completed | failed
+        self.log: str = ""
+        self.started_at: Optional[str] = None
+        self.completed_at: Optional[str] = None
+        self.report_file: Optional[str] = None
+
+
+_update_state = _UpdateState()
+_update_lock = threading.Lock()
+
+
+def _run_update_job() -> None:
+    """Run update_territory_addresses.py as a subprocess, capture output."""
+    try:
+        result = subprocess.run(
+            [sys.executable, UPDATE_SCRIPT],
+            capture_output=True,
+            text=True,
+            cwd=BASE,
+        )
+        _update_state.log = result.stdout + (result.stderr or "")
+        _update_state.status = "completed" if result.returncode == 0 else "failed"
+    except Exception as exc:
+        _update_state.status = "failed"
+        _update_state.log = f"Failed to start update process: {exc}"
+    finally:
+        _update_state.completed_at = datetime.now().isoformat()
+        # Find the latest report written by the script
+        try:
+            reports = sorted(
+                f for f in os.listdir(NWS_DIR) if f.startswith("update_report_")
+            )
+            _update_state.report_file = reports[-1] if reports else None
+        except OSError:
+            _update_state.report_file = None
+        _update_lock.release()
+
+
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
+app = FastAPI(
+    title="Territory Address Update Service",
+    description="Upload shapefiles and CSV data, run the address update, download results.",
+)
+
+STATIC_DIR = os.path.join(BASE, "static")
+if os.path.isdir(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+# ---------------------------------------------------------------------------
+# Root – serve web UI
+# ---------------------------------------------------------------------------
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def serve_ui():
+    html_path = os.path.join(STATIC_DIR, "index.html")
+    if not os.path.exists(html_path):
+        return HTMLResponse("<h1>UI not found</h1>", status_code=404)
+    with open(html_path) as f:
+        return f.read()
+
+
+# ---------------------------------------------------------------------------
+# Status – service status (JSON)
+# ---------------------------------------------------------------------------
+@app.get("/status", summary="Service status")
+def service_status(_user: str = Depends(authenticate)):
+    return {
+        "service": "Territory Address Update",
+        "files": {
+            "shapefile":       os.path.exists(SHAPEFILE_ZIP),
+            "territories_csv": os.path.exists(TERRITORIES_CSV),
+            "addresses_csv":   os.path.exists(ADDRESSES_CSV),
+        },
+        "ready_to_update": all(
+            os.path.exists(p) for p in [SHAPEFILE_ZIP, TERRITORIES_CSV, ADDRESSES_CSV]
+        ),
+        "update_status": _update_state.status,
+    }
+
+
+# ---------------------------------------------------------------------------
+# User management
+# ---------------------------------------------------------------------------
+class _UserCreate(BaseModel):
+    username: str
+    password: str
+
+
+class _PasswordChange(BaseModel):
+    password: str
+
+
+@app.get("/users", summary="List all usernames")
+def list_users(_user: str = Depends(authenticate)):
+    return {"users": list(_load_users().keys())}
+
+
+@app.post("/users", status_code=status.HTTP_201_CREATED, summary="Create a user")
+def create_user(body: _UserCreate, _user: str = Depends(authenticate)):
+    users = _load_users()
+    if body.username in users:
+        raise HTTPException(status_code=400, detail=f"User '{body.username}' already exists")
+    users[body.username] = pwd_ctx.hash(body.password)
+    _save_users(users)
+    return {"message": f"User '{body.username}' created"}
+
+
+@app.put("/users/{username}/password", summary="Change a user's password")
+def change_password(username: str, body: _PasswordChange, _user: str = Depends(authenticate)):
+    users = _load_users()
+    if username not in users:
+        raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+    users[username] = pwd_ctx.hash(body.password)
+    _save_users(users)
+    return {"message": f"Password updated for '{username}'"}
+
+
+@app.delete("/users/{username}", summary="Delete a user")
+def delete_user(username: str, current_user: str = Depends(authenticate)):
+    if username == current_user:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    users = _load_users()
+    if username not in users:
+        raise HTTPException(status_code=404, detail=f"User '{username}' not found")
+    del users[username]
+    _save_users(users)
+    return {"message": f"User '{username}' deleted"}
+
+
+# ---------------------------------------------------------------------------
+# File uploads
+# ---------------------------------------------------------------------------
+@app.post("/upload/shapefile", summary="Upload the parcel shapefile ZIP")
+async def upload_shapefile(
+    file: UploadFile = File(...),
+    _user: str = Depends(authenticate),
+):
+    if not file.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="File must be a .zip archive")
+    os.makedirs(CAD_DIR, exist_ok=True)
+    with open(SHAPEFILE_ZIP, "wb") as f:
+        f.write(await file.read())
+    size = os.path.getsize(SHAPEFILE_ZIP)
+    return {"message": "Shapefile uploaded", "saved_as": os.path.basename(SHAPEFILE_ZIP), "bytes": size}
+
+
+@app.post("/upload/territories", summary="Upload Territories.csv")
+async def upload_territories(
+    file: UploadFile = File(...),
+    _user: str = Depends(authenticate),
+):
+    os.makedirs(NWS_DIR, exist_ok=True)
+    with open(TERRITORIES_CSV, "wb") as f:
+        f.write(await file.read())
+    return {"message": "Territories.csv uploaded", "bytes": os.path.getsize(TERRITORIES_CSV)}
+
+
+@app.post("/upload/addresses", summary="Upload TerritoryAddresses.csv")
+async def upload_addresses(
+    file: UploadFile = File(...),
+    _user: str = Depends(authenticate),
+):
+    os.makedirs(NWS_DIR, exist_ok=True)
+    with open(ADDRESSES_CSV, "wb") as f:
+        f.write(await file.read())
+    return {"message": "TerritoryAddresses.csv uploaded", "bytes": os.path.getsize(ADDRESSES_CSV)}
+
+
+@app.get("/upload/status", summary="Check which files are present")
+def upload_status(_user: str = Depends(authenticate)):
+    def _info(path: str) -> dict:
+        if os.path.exists(path):
+            st = os.stat(path)
+            return {
+                "present": True,
+                "bytes": st.st_size,
+                "modified": datetime.fromtimestamp(st.st_mtime).isoformat(),
+            }
+        return {"present": False}
+
+    return {
+        "shapefile":       _info(SHAPEFILE_ZIP),
+        "territories_csv": _info(TERRITORIES_CSV),
+        "addresses_csv":   _info(ADDRESSES_CSV),
+        "ready_to_update": all(
+            os.path.exists(p) for p in [SHAPEFILE_ZIP, TERRITORIES_CSV, ADDRESSES_CSV]
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Update
+# ---------------------------------------------------------------------------
+@app.post("/update", summary="Start the territory address update job")
+def trigger_update(_user: str = Depends(authenticate)):
+    missing = [
+        name for name, path in [
+            ("shapefile",       SHAPEFILE_ZIP),
+            ("territories_csv", TERRITORIES_CSV),
+            ("addresses_csv",   ADDRESSES_CSV),
+        ]
+        if not os.path.exists(path)
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing required files: {', '.join(missing)}. Check /upload/status",
+        )
+
+    if not _update_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="An update is already running")
+
+    _update_state.status      = "running"
+    _update_state.log         = ""
+    _update_state.started_at  = datetime.now().isoformat()
+    _update_state.completed_at = None
+    _update_state.report_file  = None
+
+    threading.Thread(target=_run_update_job, daemon=True).start()
+
+    return {"message": "Update job started", "poll": "/update/status"}
+
+
+@app.get("/update/status", summary="Poll the current update job status")
+def get_update_status(_user: str = Depends(authenticate)):
+    return {
+        "status":       _update_state.status,
+        "started_at":   _update_state.started_at,
+        "completed_at": _update_state.completed_at,
+        "report_file":  _update_state.report_file,
+        "log":          _update_state.log,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Street query
+# ---------------------------------------------------------------------------
+@app.get("/query/street", summary="Search shapefile addresses by street name")
+async def query_street(
+    q: str = Query(..., description='Street name, e.g. "Jupiter Rd" or "Edgewood Ln, Allen"'),
+    _user: str = Depends(authenticate),
+):
+    if not os.path.exists(SHAPEFILE_ZIP):
+        raise HTTPException(status_code=400, detail="Shapefile not uploaded yet. POST /upload/shapefile first.")
+    if not q.strip():
+        raise HTTPException(status_code=400, detail="Query parameter 'q' must not be empty.")
+
+    # Import lazily so startup isn't slowed if pyshp/pyproj aren't installed yet
+    from query_shape_street import search_by_street
+
+    loop = asyncio.get_event_loop()
+    try:
+        results = await loop.run_in_executor(None, search_by_street, q.strip())
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Query failed: {exc}")
+
+    street_part = q.strip().partition(",")[0].strip()
+    city_part   = q.strip().partition(",")[2].strip()
+    return {
+        "query":       q.strip(),
+        "street":      street_part,
+        "city_filter": city_part or None,
+        "count":       len(results),
+        "results":     results,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Downloads
+# ---------------------------------------------------------------------------
+@app.get("/download/addresses", summary="Download the updated TerritoryAddresses.csv")
+def download_addresses(_user: str = Depends(authenticate)):
+    if not os.path.exists(ADDRESSES_CSV):
+        raise HTTPException(status_code=404, detail="TerritoryAddresses.csv not found")
+    return FileResponse(
+        ADDRESSES_CSV,
+        media_type="text/csv",
+        filename="TerritoryAddresses.csv",
+    )
+
+
+@app.get("/download/report", summary="Download the latest update report CSV")
+def download_report(_user: str = Depends(authenticate)):
+    if not _update_state.report_file:
+        raise HTTPException(status_code=404, detail="No report available — run an update first")
+    path = os.path.join(NWS_DIR, _update_state.report_file)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="Report file no longer on disk")
+    return FileResponse(path, media_type="text/csv", filename=_update_state.report_file)
+
+
+# ---------------------------------------------------------------------------
+# Delete all files
+# ---------------------------------------------------------------------------
+@app.delete("/files", summary="Delete all uploaded files and reports")
+def delete_files(_user: str = Depends(authenticate)):
+    if _update_state.status == "running":
+        raise HTTPException(status_code=409, detail="Cannot delete files while an update is running")
+
+    deleted = []
+
+    for path in [SHAPEFILE_ZIP, TERRITORIES_CSV, ADDRESSES_CSV]:
+        if os.path.exists(path):
+            os.remove(path)
+            deleted.append(os.path.basename(path))
+
+    # Remove all report files
+    if os.path.isdir(NWS_DIR):
+        for name in os.listdir(NWS_DIR):
+            if name.startswith("update_report_"):
+                os.remove(os.path.join(NWS_DIR, name))
+                deleted.append(name)
+
+    _update_state.status      = "idle"
+    _update_state.log         = ""
+    _update_state.started_at  = None
+    _update_state.completed_at = None
+    _update_state.report_file  = None
+
+    return {"message": "Files deleted", "deleted": deleted}

@@ -1,0 +1,875 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Territory Address Update</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    [x-cloak] { display: none; }
+    .drop-active { border-color: #3b82f6 !important; background-color: #eff6ff !important; }
+    .log-out { font-family: ui-monospace, monospace; font-size: 0.72rem; line-height: 1.5; }
+    .spin { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .fade-in { animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+    tbody tr:nth-child(even) { background-color: #f8fafc; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  </style>
+</head>
+<body class="bg-slate-100 text-gray-800 antialiased">
+
+<!-- ══════════════════════════════ TOAST ══════════════════════════════════ -->
+<div id="toast"
+     class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"
+     aria-live="polite"></div>
+
+<!-- ══════════════════════════ LOGIN SCREEN ══════════════════════════════ -->
+<div id="login-screen"
+     class="min-h-screen bg-gradient-to-br from-slate-800 to-slate-950 flex items-center justify-center">
+  <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm fade-in">
+    <div class="text-center mb-8">
+      <div class="text-5xl mb-3">🗺️</div>
+      <h1 class="text-2xl font-bold text-gray-900">Territory Address Update</h1>
+      <p class="text-sm text-gray-400 mt-1">Sign in to manage your territory data</p>
+    </div>
+    <form id="login-form" class="space-y-4">
+      <div>
+        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Username</label>
+        <input id="li-user" type="text" value="admin" required autocomplete="username"
+          class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition" />
+      </div>
+      <div>
+        <label class="block text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Password</label>
+        <input id="li-pass" type="password" value="changeme" required autocomplete="current-password"
+          class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition" />
+      </div>
+      <p id="li-err" class="text-red-500 text-sm hidden"></p>
+      <button type="submit"
+        class="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors shadow-sm">
+        Sign In
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ MAIN APP ═════════════════════════════════ -->
+<div id="app" class="hidden min-h-screen flex flex-col">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-6 flex items-center h-14 gap-6">
+      <div class="flex items-center gap-2 shrink-0">
+        <span class="text-2xl">🗺️</span>
+        <span class="font-bold text-gray-900 text-base leading-tight">Territory<br><span class="text-blue-600">Address Update</span></span>
+      </div>
+
+      <!-- Nav tabs -->
+      <nav class="flex gap-1 flex-1 overflow-x-auto" id="nav-tabs">
+        <button class="nav-tab" data-section="dashboard">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Dashboard
+        </button>
+        <button class="nav-tab" data-section="files">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+          Files
+        </button>
+        <button class="nav-tab" data-section="update">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          Update
+        </button>
+        <button class="nav-tab" data-section="query">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Query
+        </button>
+        <button class="nav-tab" data-section="users">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Users
+        </button>
+      </nav>
+
+      <div class="flex items-center gap-3 shrink-0 text-sm">
+        <span class="text-gray-400">
+          <span id="hdr-user" class="font-semibold text-gray-700"></span>
+        </span>
+        <button onclick="logout()"
+          class="text-xs font-semibold text-red-500 hover:text-red-700 border border-red-200 hover:border-red-400 px-3 py-1.5 rounded-lg transition-colors">
+          Sign out
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Content -->
+  <main class="flex-1 max-w-7xl mx-auto w-full px-6 py-7 space-y-0">
+
+    <!-- ─────────────── DASHBOARD ─────────────── -->
+    <section id="sec-dashboard" class="section hidden space-y-6">
+      <h2 class="text-xl font-bold text-gray-900">Dashboard</h2>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4" id="db-file-cards">
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 animate-pulse h-28"></div>
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 animate-pulse h-28"></div>
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 animate-pulse h-28"></div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-semibold text-gray-700">Last Update</h3>
+          <button onclick="showSection('update')"
+            class="text-xs font-semibold text-blue-600 hover:text-blue-800">Go to Update →</button>
+        </div>
+        <div id="db-update-info" class="text-sm text-gray-400">Loading…</div>
+      </div>
+    </section>
+
+    <!-- ─────────────── FILES ─────────────── -->
+    <section id="sec-files" class="section hidden space-y-6">
+      <div class="flex items-center justify-between">
+        <h2 class="text-xl font-bold text-gray-900">File Management</h2>
+        <button onclick="deleteAllFiles()"
+          class="flex items-center gap-2 text-sm font-semibold text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 border border-red-200 px-4 py-2 rounded-xl transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+          Delete All Files
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <!-- Shapefile -->
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+          <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
+            <span class="text-xl">📦</span>
+            <div>
+              <div class="text-white font-semibold text-sm">Parcel Shapefile</div>
+              <div class="text-slate-400 text-xs">.zip archive</div>
+            </div>
+          </div>
+          <div class="p-4 flex-1 flex flex-col gap-3">
+            <div id="fs-shapefile" class="text-xs text-gray-400">Checking…</div>
+            <div id="dz-shapefile"
+              class="drop-zone flex-1 border-2 border-dashed border-gray-200 rounded-xl p-5 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all"
+              onclick="document.getElementById('fi-shapefile').click()">
+              <div class="text-gray-300 text-xs">Drop file here or click to browse</div>
+              <input id="fi-shapefile" type="file" accept=".zip" class="hidden"
+                onchange="handleFileInput(this, '/upload/shapefile')" />
+            </div>
+            <div id="prog-shapefile" class="hidden space-y-1">
+              <div class="h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                <div class="h-full bg-blue-500 rounded-full w-full animate-pulse"></div>
+              </div>
+              <div class="text-xs text-gray-400 text-center">Uploading…</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Territories -->
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+          <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
+            <span class="text-xl">📋</span>
+            <div>
+              <div class="text-white font-semibold text-sm">Territories</div>
+              <div class="text-slate-400 text-xs">Territories.csv</div>
+            </div>
+          </div>
+          <div class="p-4 flex-1 flex flex-col gap-3">
+            <div id="fs-territories" class="text-xs text-gray-400">Checking…</div>
+            <div id="dz-territories"
+              class="drop-zone flex-1 border-2 border-dashed border-gray-200 rounded-xl p-5 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all"
+              onclick="document.getElementById('fi-territories').click()">
+              <div class="text-gray-300 text-xs">Drop file here or click to browse</div>
+              <input id="fi-territories" type="file" accept=".csv,.txt" class="hidden"
+                onchange="handleFileInput(this, '/upload/territories')" />
+            </div>
+            <div id="prog-territories" class="hidden space-y-1">
+              <div class="h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                <div class="h-full bg-blue-500 rounded-full w-full animate-pulse"></div>
+              </div>
+              <div class="text-xs text-gray-400 text-center">Uploading…</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Addresses -->
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+          <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
+            <span class="text-xl">📍</span>
+            <div>
+              <div class="text-white font-semibold text-sm">Territory Addresses</div>
+              <div class="text-slate-400 text-xs">TerritoryAddresses.csv</div>
+            </div>
+          </div>
+          <div class="p-4 flex-1 flex flex-col gap-3">
+            <div id="fs-addresses" class="text-xs text-gray-400">Checking…</div>
+            <div id="dz-addresses"
+              class="drop-zone flex-1 border-2 border-dashed border-gray-200 rounded-xl p-5 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all"
+              onclick="document.getElementById('fi-addresses').click()">
+              <div class="text-gray-300 text-xs">Drop file here or click to browse</div>
+              <input id="fi-addresses" type="file" accept=".csv,.txt" class="hidden"
+                onchange="handleFileInput(this, '/upload/addresses')" />
+            </div>
+            <div id="prog-addresses" class="hidden space-y-1">
+              <div class="h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                <div class="h-full bg-blue-500 rounded-full w-full animate-pulse"></div>
+              </div>
+              <div class="text-xs text-gray-400 text-center">Uploading…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────── UPDATE ─────────────── -->
+    <section id="sec-update" class="section hidden space-y-5">
+      <h2 class="text-xl font-bold text-gray-900">Run Update</h2>
+
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+        <div class="flex flex-wrap items-center gap-3">
+          <button id="upd-btn" onclick="startUpdate()"
+            class="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-semibold px-5 py-2.5 rounded-xl text-sm transition-colors shadow-sm">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Start Update
+          </button>
+
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-400 font-medium">Status</span>
+            <span id="upd-badge"
+              class="px-2.5 py-1 rounded-full text-xs font-bold tracking-wide bg-gray-100 text-gray-500">
+              idle
+            </span>
+          </div>
+
+          <div class="flex-1"></div>
+
+          <div id="upd-dl-btns" class="hidden flex gap-2">
+            <button onclick="authDownload('/download/addresses', 'TerritoryAddresses.csv')"
+              class="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-colors">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Addresses CSV
+            </button>
+            <button onclick="authDownload('/download/report', 'update_report.csv')"
+              class="flex items-center gap-1.5 bg-slate-600 hover:bg-slate-700 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-colors">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Report CSV
+            </button>
+          </div>
+        </div>
+
+        <div id="upd-timing" class="text-xs text-gray-400 hidden"></div>
+
+        <div id="upd-not-ready"
+          class="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-4 py-2.5 hidden">
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          Upload all three files before running an update. Go to <button onclick="showSection('files')" class="underline font-semibold ml-1">Files</button>.
+        </div>
+      </div>
+
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+          <h3 class="text-sm font-semibold text-gray-600">Output Log</h3>
+          <button onclick="scrollLogToBottom()"
+            class="text-xs text-blue-500 hover:text-blue-700 font-medium">↓ bottom</button>
+        </div>
+        <pre id="upd-log"
+          class="log-out bg-slate-950 text-emerald-400 px-5 py-4 h-80 overflow-auto whitespace-pre-wrap">Waiting for update…</pre>
+      </div>
+    </section>
+
+    <!-- ─────────────── QUERY ─────────────── -->
+    <section id="sec-query" class="section hidden space-y-5">
+      <h2 class="text-xl font-bold text-gray-900">Query Shape Data</h2>
+
+      <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3">
+        <div class="flex gap-3">
+          <input id="q-input" type="text"
+            placeholder='Street name — e.g.  Jupiter Rd   or   Edgewood Ln, Allen'
+            class="flex-1 border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
+            onkeydown="if(event.key==='Enter') runQuery()" />
+          <button id="q-btn" onclick="runQuery()"
+            class="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed text-white font-semibold px-6 py-2.5 rounded-xl text-sm transition-colors shadow-sm">
+            <svg id="q-icon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span id="q-btn-label">Search</span>
+          </button>
+        </div>
+        <p class="text-xs text-gray-400">
+          Abbreviations and full words are interchangeable — <code class="bg-gray-100 px-1 rounded">Ln = Lane</code>&nbsp;
+          <code class="bg-gray-100 px-1 rounded">S = South</code>&nbsp;
+          <code class="bg-gray-100 px-1 rounded">Dr = Drive</code>.
+          Append a comma and city to filter: <code class="bg-gray-100 px-1 rounded">Jupiter Rd, Allen</code>
+        </p>
+      </div>
+
+      <!-- Results -->
+      <div id="q-results" class="hidden space-y-3 fade-in">
+        <div class="flex items-center justify-between">
+          <h3 id="q-result-hdr" class="text-sm font-semibold text-gray-700"></h3>
+          <span id="q-truncation" class="text-xs text-amber-600 hidden"></span>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead class="bg-slate-50 border-b border-gray-100 sticky top-0">
+                <tr>
+                  <th class="text-left px-3 py-3 font-semibold text-gray-500 whitespace-nowrap">No.</th>
+                  <th class="text-left px-3 py-3 font-semibold text-gray-500">Dir</th>
+                  <th class="text-left px-3 py-3 font-semibold text-gray-500 whitespace-nowrap">Street Name</th>
+                  <th class="text-left px-3 py-3 font-semibold text-gray-500">Sfx</th>
+                  <th class="text-left px-3 py-3 font-semibold text-gray-500">Unit</th>
+                  <th class="text-left px-3 py-3 font-semibold text-gray-500">City</th>
+                  <th class="text-left px-3 py-3 font-semibold text-gray-500">ST</th>
+                  <th class="text-left px-3 py-3 font-semibold text-gray-500">Zip</th>
+                  <th class="text-left px-3 py-3 font-semibold text-gray-500 whitespace-nowrap">Latitude</th>
+                  <th class="text-left px-3 py-3 font-semibold text-gray-500 whitespace-nowrap">Longitude</th>
+                  <th class="text-left px-3 py-3 font-semibold text-gray-500">Class</th>
+                  <th class="text-left px-3 py-3 font-semibold text-gray-500 whitespace-nowrap">Legal Description</th>
+                </tr>
+              </thead>
+              <tbody id="q-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─────────────── USERS ─────────────── -->
+    <section id="sec-users" class="section hidden space-y-6">
+      <h2 class="text-xl font-bold text-gray-900">User Management</h2>
+
+      <div class="grid grid-cols-1 md:grid-cols-5 gap-5">
+
+        <!-- User list -->
+        <div class="md:col-span-3 bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+          <h3 class="font-semibold text-gray-700 mb-4 text-sm">Users</h3>
+          <div id="usr-list" class="divide-y divide-gray-50"></div>
+        </div>
+
+        <!-- Forms -->
+        <div class="md:col-span-2 space-y-4">
+
+          <!-- Add user -->
+          <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <h3 class="font-semibold text-gray-700 mb-4 text-sm">Add User</h3>
+            <form id="add-user-form" onsubmit="addUser(event)" class="space-y-3">
+              <input id="nu-name" type="text" placeholder="Username" required autocomplete="off"
+                class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition" />
+              <input id="nu-pass" type="password" placeholder="Password" required
+                class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition" />
+              <button type="submit"
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
+                Add User
+              </button>
+            </form>
+          </div>
+
+          <!-- Change password -->
+          <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <h3 class="font-semibold text-gray-700 mb-4 text-sm">Change Password</h3>
+            <form onsubmit="changePassword(event)" class="space-y-3">
+              <select id="cpw-who"
+                class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition bg-white"></select>
+              <input id="cpw-pass" type="password" placeholder="New password" required
+                class="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition" />
+              <button type="submit"
+                class="w-full bg-amber-500 hover:bg-amber-600 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
+                Change Password
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ══════════════════════════ CONFIRM MODAL ══════════════════════════════ -->
+<div id="modal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 hidden items-center justify-center flex">
+  <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4 fade-in">
+    <h3 id="modal-title" class="font-bold text-gray-900 text-lg mb-2"></h3>
+    <p id="modal-body" class="text-gray-500 text-sm mb-6"></p>
+    <div class="flex gap-3">
+      <button id="modal-ok"
+        class="flex-1 bg-red-600 hover:bg-red-700 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
+        Confirm
+      </button>
+      <button onclick="_modalResolve(false)"
+        class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2.5 rounded-xl text-sm transition-colors">
+        Cancel
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ TAILWIND NAV STYLES ════════════════════ -->
+<style>
+  .nav-tab {
+    display: flex; align-items: center; gap: 6px; padding: 6px 14px;
+    border-radius: 10px; font-size: 0.8125rem; font-weight: 600;
+    white-space: nowrap; color: #64748b; transition: all 0.15s;
+  }
+  .nav-tab:hover { background: #f1f5f9; color: #1e293b; }
+  .nav-tab.active { background: #2563eb; color: #fff; }
+</style>
+
+<script>
+/* ════════════════════════════ STATE ══════════════════════════════════════ */
+let _creds = sessionStorage.getItem('creds');
+let _user  = sessionStorage.getItem('user');
+let _poller = null;
+let _modalResolve = null;
+
+/* ════════════════════════════ AUTH ═══════════════════════════════════════ */
+document.getElementById('login-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const u = document.getElementById('li-user').value.trim();
+  const p = document.getElementById('li-pass').value;
+  const encoded = btoa(`${u}:${p}`);
+  try {
+    const r = await fetch('/status', { headers: { Authorization: 'Basic ' + encoded } });
+    if (r.status === 401) throw new Error('Invalid username or password');
+    if (!r.ok) throw new Error('Server error — check service is running');
+    _creds = encoded; _user = u;
+    sessionStorage.setItem('creds', _creds);
+    sessionStorage.setItem('user',  _user);
+    bootApp();
+  } catch (err) {
+    const el = document.getElementById('li-err');
+    el.textContent = err.message;
+    el.classList.remove('hidden');
+  }
+});
+
+function logout() {
+  sessionStorage.clear();
+  _creds = null; _user = null;
+  clearInterval(_poller);
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('login-screen').classList.remove('hidden');
+}
+
+/* ════════════════════════════ API ════════════════════════════════════════ */
+async function api(method, path, body = null) {
+  const opts = { method, headers: { Authorization: 'Basic ' + _creds } };
+  if (body instanceof FormData) {
+    opts.body = body;
+  } else if (body !== null) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(path, opts);
+  if (r.status === 401) { logout(); throw new Error('Session expired'); }
+  return r;
+}
+
+async function apiJson(method, path, body = null) {
+  const r = await api(method, path, body);
+  const d = await r.json().catch(() => ({ detail: r.statusText }));
+  if (!r.ok) throw new Error(d.detail || r.statusText);
+  return d;
+}
+
+/* ════════════════════════════ TOAST ══════════════════════════════════════ */
+function toast(msg, type = 'info') {
+  const colours = {
+    success: 'bg-emerald-600', error: 'bg-red-600',
+    info: 'bg-blue-600',       warn: 'bg-amber-500',
+  };
+  const el = document.createElement('div');
+  el.className = `pointer-events-auto fade-in ${colours[type] || colours.info} text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg max-w-sm`;
+  el.textContent = msg;
+  document.getElementById('toast').appendChild(el);
+  setTimeout(() => el.remove(), 3800);
+}
+
+/* ════════════════════════════ CONFIRM MODAL ══════════════════════════════ */
+function showConfirm(title, body) {
+  return new Promise(resolve => {
+    document.getElementById('modal-title').textContent = title;
+    document.getElementById('modal-body').textContent  = body;
+    document.getElementById('modal').classList.remove('hidden');
+    _modalResolve = val => {
+      document.getElementById('modal').classList.add('hidden');
+      resolve(val);
+    };
+    document.getElementById('modal-ok').onclick = () => _modalResolve(true);
+  });
+}
+
+/* ════════════════════════════ NAVIGATION ═════════════════════════════════ */
+function showSection(name) {
+  document.querySelectorAll('.section').forEach(s => s.classList.add('hidden'));
+  document.querySelectorAll('.nav-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.section === name);
+  });
+  document.getElementById('sec-' + name).classList.remove('hidden');
+  ({ dashboard: loadDashboard, files: loadFiles,
+     update: loadUpdate, query: () => {}, users: loadUsers })[name]?.();
+}
+
+document.querySelectorAll('.nav-tab').forEach(b =>
+  b.addEventListener('click', () => showSection(b.dataset.section))
+);
+
+/* ════════════════════════════ DASHBOARD ══════════════════════════════════ */
+async function loadDashboard() {
+  try {
+    const [st, upd] = await Promise.all([
+      apiJson('GET', '/upload/status'),
+      apiJson('GET', '/update/status'),
+    ]);
+    const defs = [
+      { key: 'shapefile',       label: 'Parcel Shapefile',     icon: '📦' },
+      { key: 'territories_csv', label: 'Territories CSV',      icon: '📋' },
+      { key: 'addresses_csv',   label: 'Territory Addresses',  icon: '📍' },
+    ];
+    document.getElementById('db-file-cards').innerHTML = defs.map(d => {
+      const f = st[d.key];
+      return `<div class="bg-white rounded-2xl border ${f.present ? 'border-emerald-100' : 'border-gray-100'} shadow-sm p-5 flex items-start gap-4">
+        <span class="text-3xl">${d.icon}</span>
+        <div>
+          <div class="font-semibold text-sm text-gray-700">${d.label}</div>
+          ${f.present
+            ? `<div class="text-xs text-emerald-600 font-semibold mt-0.5">✓ Uploaded</div>
+               <div class="text-xs text-gray-400 mt-1">${fmtBytes(f.bytes)} &middot; ${fmtDate(f.modified)}</div>`
+            : `<div class="text-xs text-gray-400 mt-0.5">Not uploaded</div>`}
+        </div>
+      </div>`;
+    }).join('');
+
+    const badgeCls = {
+      idle: 'bg-gray-100 text-gray-500',
+      running: 'bg-blue-100 text-blue-700',
+      completed: 'bg-emerald-100 text-emerald-700',
+      failed: 'bg-red-100 text-red-700',
+    }[upd.status] || 'bg-gray-100 text-gray-500';
+
+    document.getElementById('db-update-info').innerHTML =
+      `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${badgeCls}">${upd.status}</span>` +
+      (upd.completed_at ? `<span class="text-xs text-gray-400 ml-3">Completed ${fmtDate(upd.completed_at)}</span>` : '');
+  } catch (_) {}
+}
+
+/* ════════════════════════════ FILES ══════════════════════════════════════ */
+async function loadFiles() {
+  try {
+    const st = await apiJson('GET', '/upload/status');
+    renderFileStat('fs-shapefile',    st.shapefile);
+    renderFileStat('fs-territories',  st.territories_csv);
+    renderFileStat('fs-addresses',    st.addresses_csv);
+  } catch (_) {}
+}
+
+function renderFileStat(id, info) {
+  document.getElementById(id).innerHTML = info.present
+    ? `<span class="text-emerald-600 font-semibold">✓ Uploaded</span>
+       <span class="text-gray-300 mx-1">·</span>${fmtBytes(info.bytes)}
+       <span class="text-gray-300 mx-1">·</span><span class="text-gray-400">${fmtDate(info.modified)}</span>`
+    : '<span class="text-gray-400">Not uploaded</span>';
+}
+
+/* Drag-and-drop wiring */
+function wireDrop(dzId, endpoint) {
+  const el = document.getElementById(dzId);
+  el.addEventListener('dragover',  e => { e.preventDefault(); el.classList.add('drop-active'); });
+  el.addEventListener('dragleave', ()  => el.classList.remove('drop-active'));
+  el.addEventListener('drop', e => {
+    e.preventDefault(); el.classList.remove('drop-active');
+    const f = e.dataTransfer.files[0];
+    if (f) uploadFile(f, endpoint);
+  });
+}
+
+function handleFileInput(input, endpoint) {
+  if (input.files[0]) uploadFile(input.files[0], endpoint);
+  input.value = '';   // allow re-selecting same file
+}
+
+async function uploadFile(file, endpoint) {
+  const key = { '/upload/shapefile': 'shapefile', '/upload/territories': 'territories',
+                '/upload/addresses': 'addresses' }[endpoint];
+  const progEl = document.getElementById('prog-' + key);
+  progEl?.classList.remove('hidden');
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const r = await api('POST', endpoint, fd);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    toast(`${file.name} uploaded`, 'success');
+    loadFiles();
+  } catch (err) {
+    toast('Upload failed: ' + err.message, 'error');
+  } finally {
+    progEl?.classList.add('hidden');
+  }
+}
+
+async function deleteAllFiles() {
+  if (!await showConfirm('Delete All Files',
+    'Permanently delete the shapefile, both CSV files, and all update reports?')) return;
+  try {
+    const d = await apiJson('DELETE', '/files');
+    toast(d.deleted.length ? `Deleted: ${d.deleted.join(', ')}` : 'Nothing to delete', 'info');
+    loadFiles();
+    loadDashboard();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+/* ════════════════════════════ UPDATE ═════════════════════════════════════ */
+async function loadUpdate() {
+  try {
+    const [upd, st] = await Promise.all([
+      apiJson('GET', '/update/status'),
+      apiJson('GET', '/upload/status'),
+    ]);
+    applyUpdateState(upd, st.ready_to_update);
+    if (upd.status === 'running' && !_poller) startPolling();
+  } catch (_) {}
+}
+
+const _updBadgeCls = {
+  idle:      'bg-gray-100 text-gray-500',
+  running:   'bg-blue-100 text-blue-700',
+  completed: 'bg-emerald-100 text-emerald-700',
+  failed:    'bg-red-100 text-red-700',
+};
+
+function applyUpdateState(upd, ready) {
+  const badge    = document.getElementById('upd-badge');
+  const btn      = document.getElementById('upd-btn');
+  const dlBtns   = document.getElementById('upd-dl-btns');
+  const timing   = document.getElementById('upd-timing');
+  const log      = document.getElementById('upd-log');
+  const notReady = document.getElementById('upd-not-ready');
+
+  badge.className = `px-2.5 py-1 rounded-full text-xs font-bold tracking-wide ${_updBadgeCls[upd.status] || _updBadgeCls.idle}`;
+  badge.textContent = upd.status;
+
+  btn.disabled = upd.status === 'running' || !ready;
+  notReady.classList.toggle('hidden', ready || upd.status === 'running');
+
+  if (upd.log) { log.textContent = upd.log; scrollLogToBottom(); }
+
+  if (upd.started_at) {
+    let t = `Started: ${fmtDate(upd.started_at)}`;
+    if (upd.completed_at) t += `   ·   Completed: ${fmtDate(upd.completed_at)}`;
+    timing.textContent = t;
+    timing.classList.remove('hidden');
+  }
+
+  const done = upd.status === 'completed' || upd.status === 'failed';
+  dlBtns.classList.toggle('hidden', !done);
+}
+
+async function startUpdate() {
+  try {
+    await apiJson('POST', '/update');
+    applyUpdateState({ status: 'running', log: '', started_at: new Date().toISOString() }, true);
+    toast('Update started — this may take a few minutes', 'info');
+    startPolling();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function startPolling() {
+  clearInterval(_poller);
+  _poller = setInterval(async () => {
+    try {
+      const [upd, st] = await Promise.all([
+        apiJson('GET', '/update/status'),
+        apiJson('GET', '/upload/status'),
+      ]);
+      applyUpdateState(upd, st.ready_to_update);
+      if (upd.status !== 'running') {
+        clearInterval(_poller); _poller = null;
+        toast(
+          upd.status === 'completed' ? 'Update completed successfully!' : 'Update failed — see log',
+          upd.status === 'completed' ? 'success' : 'error'
+        );
+      }
+    } catch (_) {}
+  }, 3000);
+}
+
+function scrollLogToBottom() {
+  const el = document.getElementById('upd-log');
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ════════════════════════════ QUERY ══════════════════════════════════════ */
+const QUERY_MAX = 500;
+
+async function runQuery() {
+  const q = document.getElementById('q-input').value.trim();
+  if (!q) { toast('Enter a street name', 'warn'); return; }
+
+  const btn   = document.getElementById('q-btn');
+  const label = document.getElementById('q-btn-label');
+  const icon  = document.getElementById('q-icon');
+
+  btn.disabled = true;
+  label.textContent = 'Searching…';
+  icon.outerHTML = `<svg id="q-icon" class="w-4 h-4 spin" fill="none" viewBox="0 0 24 24">
+    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>`;
+
+  try {
+    const data = await apiJson('GET', `/query/street?q=${encodeURIComponent(q)}`);
+    renderQueryResults(data);
+  } catch (e) {
+    toast('Query failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    document.getElementById('q-btn-label').textContent = 'Search';
+    const iconEl = document.getElementById('q-icon');
+    if (iconEl) {
+      iconEl.outerHTML = `<svg id="q-icon" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
+    }
+  }
+}
+
+function renderQueryResults(data) {
+  const display = data.results.slice(0, QUERY_MAX);
+  document.getElementById('q-result-hdr').textContent =
+    `${data.count.toLocaleString()} result${data.count !== 1 ? 's' : ''} for "${data.query}"`;
+
+  const trunc = document.getElementById('q-truncation');
+  if (data.count > QUERY_MAX) {
+    trunc.textContent = `Showing first ${QUERY_MAX.toLocaleString()} of ${data.count.toLocaleString()} — narrow with a city filter.`;
+    trunc.classList.remove('hidden');
+  } else {
+    trunc.classList.add('hidden');
+  }
+
+  document.getElementById('q-tbody').innerHTML = display.map(r => `
+    <tr class="hover:bg-blue-50 transition-colors">
+      <td class="px-3 py-2.5 font-semibold text-gray-800 whitespace-nowrap">${x(r.number)}</td>
+      <td class="px-3 py-2.5 text-gray-400">${x(r.direction)}</td>
+      <td class="px-3 py-2.5 text-gray-700 whitespace-nowrap">${x(r.street_name)}</td>
+      <td class="px-3 py-2.5 text-gray-400">${x(r.suffix)}</td>
+      <td class="px-3 py-2.5 text-gray-500">${x(r.unit)}</td>
+      <td class="px-3 py-2.5 text-gray-600 whitespace-nowrap">${x(r.city)}</td>
+      <td class="px-3 py-2.5 text-gray-400">${x(r.state)}</td>
+      <td class="px-3 py-2.5 text-gray-400 font-mono">${x(r.zip)}</td>
+      <td class="px-3 py-2.5 text-gray-400 font-mono whitespace-nowrap">${r.latitude ?? ''}</td>
+      <td class="px-3 py-2.5 text-gray-400 font-mono whitespace-nowrap">${r.longitude ?? ''}</td>
+      <td class="px-3 py-2.5"><span class="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">${x(r.class_code)}</span></td>
+      <td class="px-3 py-2.5 text-gray-400 max-w-xs truncate" title="${x(r.legal_desc)}">${x(r.legal_desc)}</td>
+    </tr>`).join('');
+
+  document.getElementById('q-results').classList.remove('hidden');
+}
+
+/* ════════════════════════════ USERS ══════════════════════════════════════ */
+async function loadUsers() {
+  try {
+    const { users } = await apiJson('GET', '/users');
+    const list   = document.getElementById('usr-list');
+    const select = document.getElementById('cpw-who');
+
+    list.innerHTML = users.map(u => `
+      <div class="flex items-center justify-between py-3 first:pt-0 last:pb-0">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-sm font-bold text-slate-500">
+            ${u[0].toUpperCase()}
+          </div>
+          <span class="text-sm font-medium text-gray-800">${x(u)}</span>
+          ${u === _user ? '<span class="text-xs bg-blue-50 text-blue-600 font-semibold px-2 py-0.5 rounded-full">you</span>' : ''}
+        </div>
+        ${u !== _user
+          ? `<button onclick="deleteUser('${x(u)}')"
+               class="text-xs font-semibold text-red-400 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors">
+               Delete
+             </button>`
+          : ''}
+      </div>`).join('');
+
+    select.innerHTML = users.map(u => `<option value="${x(u)}">${x(u)}</option>`).join('');
+  } catch (_) {}
+}
+
+async function addUser(e) {
+  e.preventDefault();
+  const username = document.getElementById('nu-name').value.trim();
+  const password = document.getElementById('nu-pass').value;
+  try {
+    await apiJson('POST', '/users', { username, password });
+    toast(`User '${username}' created`, 'success');
+    document.getElementById('add-user-form').reset();
+    loadUsers();
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function deleteUser(username) {
+  if (!await showConfirm('Delete User', `Permanently delete user '${username}'?`)) return;
+  try {
+    await apiJson('DELETE', `/users/${encodeURIComponent(username)}`);
+    toast(`User '${username}' deleted`, 'info');
+    loadUsers();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function changePassword(e) {
+  e.preventDefault();
+  const username = document.getElementById('cpw-who').value;
+  const password = document.getElementById('cpw-pass').value;
+  try {
+    await apiJson('PUT', `/users/${encodeURIComponent(username)}/password`, { password });
+    toast(`Password updated for '${username}'`, 'success');
+    e.target.reset();
+    if (username === _user) {
+      _creds = btoa(`${username}:${password}`);
+      sessionStorage.setItem('creds', _creds);
+    }
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* ════════════════════════════ DOWNLOADS ══════════════════════════════════ */
+async function authDownload(path, filename) {
+  try {
+    const r = await api('GET', path);
+    if (!r.ok) { toast('Download failed', 'error'); return; }
+    const blob = await r.blob();
+    const url  = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (err) { toast('Download failed: ' + err.message, 'error'); }
+}
+
+/* ════════════════════════════ UTILITIES ══════════════════════════════════ */
+function x(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function fmtBytes(b) {
+  if (b == null || b === '') return '';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  return (b / 1048576).toFixed(1) + ' MB';
+}
+function fmtDate(iso) {
+  if (!iso) return '';
+  try { return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }); }
+  catch { return iso; }
+}
+
+/* ════════════════════════════ BOOT ═══════════════════════════════════════ */
+function bootApp() {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('hdr-user').textContent = _user;
+  wireDrop('dz-shapefile',    '/upload/shapefile');
+  wireDrop('dz-territories',  '/upload/territories');
+  wireDrop('dz-addresses',    '/upload/addresses');
+  showSection('dashboard');
+  // Resume polling if update was already running
+  apiJson('GET', '/update/status').then(upd => {
+    if (upd.status === 'running') startPolling();
+  }).catch(() => {});
+}
+
+if (_creds) { bootApp(); }
+</script>
+</body>
+</html>
