@@ -1,5 +1,7 @@
 # Data directories — never commit source files or outputs
 data/
+# Runtime credentials override (default credentials.json in repo root is tracked)
+data/credentials.json
 
 # Runtime files (credentials.json is tracked as the default; ignore local overrides via volume)
 users.json
