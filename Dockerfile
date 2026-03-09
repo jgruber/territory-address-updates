@@ -16,13 +16,14 @@ COPY service.py .
 COPY update_territory_addresses.py .
 COPY query_shape_street.py .
 COPY static/ static/
+COPY credentials.json .
 
 # Data directories are expected to be mounted or populated via the upload API.
 # Pre-create the directory structure so the app can write on first upload.
 RUN mkdir -p data/NWS data/CAD
 
-# users.json is written here at runtime; keep it in a named volume for persistence
-VOLUME ["/app/data", "/app/users.json"]
+# credentials.json and data are kept in named volumes for persistence
+VOLUME ["/app/data", "/app/credentials.json"]
 
 EXPOSE 8000
 

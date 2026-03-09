@@ -1,7 +1,7 @@
 # Data directories — never commit source files or outputs
 data/
 
-# Runtime files
+# Runtime files (credentials.json is tracked as the default; ignore local overrides via volume)
 users.json
 __pycache__/
 *.py[cod]

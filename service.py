@@ -44,7 +44,6 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, st
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from passlib.context import CryptContext
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
@@ -54,37 +53,24 @@ BASE      = os.path.dirname(os.path.abspath(__file__))
 NWS_DIR   = os.path.join(BASE, "data", "NWS")
 CAD_DIR   = os.path.join(BASE, "data", "CAD")
 
-USERS_FILE       = os.path.join(BASE, "users.json")
+CREDENTIALS_FILE = os.path.join(BASE, "credentials.json")
 TERRITORIES_CSV  = os.path.join(NWS_DIR, "Territories.csv")
 ADDRESSES_CSV    = os.path.join(NWS_DIR, "TerritoryAddresses.csv")
 SHAPEFILE_ZIP    = os.path.join(CAD_DIR,  "parcels_with_appraisal_data_R5.zip")
 UPDATE_SCRIPT    = os.path.join(BASE, "update_territory_addresses.py")
 
-# ---------------------------------------------------------------------------
-# Password hashing
-# ---------------------------------------------------------------------------
-pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def _load_users() -> dict:
-    if os.path.exists(USERS_FILE):
-        with open(USERS_FILE) as f:
+    if os.path.exists(CREDENTIALS_FILE):
+        with open(CREDENTIALS_FILE) as f:
             return json.load(f)
     return {}
 
 
 def _save_users(users: dict) -> None:
-    with open(USERS_FILE, "w") as f:
+    with open(CREDENTIALS_FILE, "w") as f:
         json.dump(users, f, indent=2)
 
-
-def _init_users() -> None:
-    """Create users.json with the default admin account if it doesn't exist."""
-    if not os.path.exists(USERS_FILE):
-        _save_users({"admin": pwd_ctx.hash("changeme")})
-
-
-_init_users()
 
 # ---------------------------------------------------------------------------
 # Authentication
@@ -96,7 +82,7 @@ def authenticate(credentials: HTTPBasicCredentials = Depends(security)) -> str:
     """Validate HTTP Basic credentials and return the authenticated username."""
     users = _load_users()
     user = credentials.username
-    if user not in users or not pwd_ctx.verify(credentials.password, users[user]):
+    if user not in users or users[user] != credentials.password:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
@@ -214,7 +200,7 @@ def create_user(body: _UserCreate, _user: str = Depends(authenticate)):
     users = _load_users()
     if body.username in users:
         raise HTTPException(status_code=400, detail=f"User '{body.username}' already exists")
-    users[body.username] = pwd_ctx.hash(body.password)
+    users[body.username] = body.password
     _save_users(users)
     return {"message": f"User '{body.username}' created"}
 
@@ -224,7 +210,7 @@ def change_password(username: str, body: _PasswordChange, _user: str = Depends(a
     users = _load_users()
     if username not in users:
         raise HTTPException(status_code=404, detail=f"User '{username}' not found")
-    users[username] = pwd_ctx.hash(body.password)
+    users[username] = body.password
     _save_users(users)
     return {"message": f"Password updated for '{username}'"}
 
