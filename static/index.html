@@ -151,7 +151,7 @@
     <section id="sec-dashboard" class="section hidden space-y-6">
       <h2 class="text-xl font-bold text-gray-900">Dashboard</h2>
 
-      <div class="grid grid-cols-1 sm:grid-cols-3 gap-4" id="db-file-cards">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4" id="db-file-cards">
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 animate-pulse h-28"></div>
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 animate-pulse h-28"></div>
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 animate-pulse h-28"></div>
@@ -178,7 +178,7 @@
         </button>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5">
         <!-- Shapefile -->
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
           <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
@@ -259,6 +259,61 @@
             </div>
           </div>
         </div>
+
+        <!-- Persons -->
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+          <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
+            <span class="text-xl">👥</span>
+            <div>
+              <div class="text-white font-semibold text-sm">Persons</div>
+              <div class="text-slate-400 text-xs">Persons.csv</div>
+            </div>
+          </div>
+          <div class="p-4 flex-1 flex flex-col gap-3">
+            <div id="fs-persons" class="text-xs text-gray-400">Checking…</div>
+            <div id="dz-persons"
+              class="drop-zone flex-1 border-2 border-dashed border-gray-200 rounded-xl p-5 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all"
+              onclick="document.getElementById('fi-persons').click()">
+              <div class="text-gray-300 text-xs">Drop file here or click to browse</div>
+              <input id="fi-persons" type="file" accept=".csv,.txt" class="hidden"
+                onchange="handleFileInput(this, '/upload/persons')" />
+            </div>
+            <div id="prog-persons" class="hidden space-y-1">
+              <div class="h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                <div class="h-full bg-blue-500 rounded-full w-full animate-pulse"></div>
+              </div>
+              <div class="text-xs text-gray-400 text-center">Uploading…</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Status -->
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+          <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
+            <span class="text-xl">🏷️</span>
+            <div>
+              <div class="text-white font-semibold text-sm">Status</div>
+              <div class="text-slate-400 text-xs">Status.csv</div>
+            </div>
+          </div>
+          <div class="p-4 flex-1 flex flex-col gap-3">
+            <div id="fs-status" class="text-xs text-gray-400">Checking…</div>
+            <div id="dz-status"
+              class="drop-zone flex-1 border-2 border-dashed border-gray-200 rounded-xl p-5 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all"
+              onclick="document.getElementById('fi-status').click()">
+              <div class="text-gray-300 text-xs">Drop file here or click to browse</div>
+              <input id="fi-status" type="file" accept=".csv,.txt" class="hidden"
+                onchange="handleFileInput(this, '/upload/status-file')" />
+            </div>
+            <div id="prog-status" class="hidden space-y-1">
+              <div class="h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                <div class="h-full bg-blue-500 rounded-full w-full animate-pulse"></div>
+              </div>
+              <div class="text-xs text-gray-400 text-center">Uploading…</div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </section>
 
@@ -581,6 +636,8 @@ async function loadDashboard() {
       { key: 'shapefile',       label: 'Parcel Shapefile',     icon: '📦' },
       { key: 'territories_csv', label: 'Territories CSV',      icon: '📋' },
       { key: 'addresses_csv',   label: 'Territory Addresses',  icon: '📍' },
+      { key: 'persons_csv',     label: 'Persons CSV',          icon: '👥' },
+      { key: 'status_csv',      label: 'Status CSV',           icon: '🏷️' },
     ];
     document.getElementById('db-file-cards').innerHTML = defs.map(d => {
       const f = st[d.key];
@@ -616,6 +673,8 @@ async function loadFiles() {
     renderFileStat('fs-shapefile',    st.shapefile);
     renderFileStat('fs-territories',  st.territories_csv);
     renderFileStat('fs-addresses',    st.addresses_csv);
+    renderFileStat('fs-persons',      st.persons_csv);
+    renderFileStat('fs-status',       st.status_csv);
   } catch (_) {}
 }
 
@@ -646,7 +705,8 @@ function handleFileInput(input, endpoint) {
 
 async function uploadFile(file, endpoint) {
   const key = { '/upload/shapefile': 'shapefile', '/upload/territories': 'territories',
-                '/upload/addresses': 'addresses' }[endpoint];
+                '/upload/addresses': 'addresses', '/upload/persons': 'persons',
+                '/upload/status-file': 'status' }[endpoint];
   const progEl = document.getElementById('prog-' + key);
   progEl?.classList.remove('hidden');
   try {
@@ -922,6 +982,8 @@ function bootApp() {
   wireDrop('dz-shapefile',    '/upload/shapefile');
   wireDrop('dz-territories',  '/upload/territories');
   wireDrop('dz-addresses',    '/upload/addresses');
+  wireDrop('dz-persons',      '/upload/persons');
+  wireDrop('dz-status',       '/upload/status-file');
   showSection('dashboard');
   // Resume polling if update was already running
   apiJson('GET', '/update/status').then(upd => {

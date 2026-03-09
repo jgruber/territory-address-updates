@@ -57,6 +57,8 @@ CREDENTIALS_FILE    = os.path.join(BASE, "data", "credentials.json")
 CREDENTIALS_DEFAULT = os.path.join(BASE, "credentials.json")
 TERRITORIES_CSV  = os.path.join(NWS_DIR, "Territories.csv")
 ADDRESSES_CSV    = os.path.join(NWS_DIR, "TerritoryAddresses.csv")
+PERSONS_CSV      = os.path.join(NWS_DIR, "Persons.csv")
+STATUS_CSV       = os.path.join(NWS_DIR, "Status.csv")
 UPDATE_SCRIPT    = os.path.join(BASE, "update_territory_addresses.py")
 
 
@@ -292,6 +294,28 @@ async def upload_addresses(
     return {"message": "TerritoryAddresses.csv uploaded", "bytes": os.path.getsize(ADDRESSES_CSV)}
 
 
+@app.post("/upload/persons", summary="Upload Persons.csv")
+async def upload_persons(
+    file: UploadFile = File(...),
+    _user: str = Depends(authenticate),
+):
+    os.makedirs(NWS_DIR, exist_ok=True)
+    with open(PERSONS_CSV, "wb") as f:
+        f.write(await file.read())
+    return {"message": "Persons.csv uploaded", "bytes": os.path.getsize(PERSONS_CSV)}
+
+
+@app.post("/upload/status-file", summary="Upload Status.csv")
+async def upload_status_file(
+    file: UploadFile = File(...),
+    _user: str = Depends(authenticate),
+):
+    os.makedirs(NWS_DIR, exist_ok=True)
+    with open(STATUS_CSV, "wb") as f:
+        f.write(await file.read())
+    return {"message": "Status.csv uploaded", "bytes": os.path.getsize(STATUS_CSV)}
+
+
 @app.get("/upload/status", summary="Check which files are present")
 def upload_status(_user: str = Depends(authenticate)):
     def _info(path: str) -> dict:
@@ -309,6 +333,8 @@ def upload_status(_user: str = Depends(authenticate)):
         "shapefile":       _info(shapefile_path) if shapefile_path else {"present": False},
         "territories_csv": _info(TERRITORIES_CSV),
         "addresses_csv":   _info(ADDRESSES_CSV),
+        "persons_csv":     _info(PERSONS_CSV),
+        "status_csv":      _info(STATUS_CSV),
         "ready_to_update": all([
             shapefile_path is not None,
             os.path.exists(TERRITORIES_CSV),
@@ -428,7 +454,7 @@ def delete_files(_user: str = Depends(authenticate)):
     deleted = []
 
     shapefile_path = _find_shapefile()
-    for path in filter(None, [shapefile_path, TERRITORIES_CSV, ADDRESSES_CSV]):
+    for path in filter(None, [shapefile_path, TERRITORIES_CSV, ADDRESSES_CSV, PERSONS_CSV, STATUS_CSV]):
         if os.path.exists(path):
             os.remove(path)
             deleted.append(os.path.basename(path))

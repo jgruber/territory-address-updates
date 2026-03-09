@@ -27,8 +27,10 @@ NWS_DIR = os.path.join(BASE, "data", "NWS")
 CAD_DIR = os.path.join(BASE, "data", "CAD")
 
 TERRITORIES_CSV = os.path.join(NWS_DIR, "Territories.csv")
-ADDRESSES_CSV = os.path.join(NWS_DIR, "TerritoryAddresses.csv")
-REPORT_CSV = os.path.join(NWS_DIR, "update_report_{}.csv")
+ADDRESSES_CSV   = os.path.join(NWS_DIR, "TerritoryAddresses.csv")
+PERSONS_CSV     = os.path.join(NWS_DIR, "Persons.csv")
+STATUS_CSV      = os.path.join(NWS_DIR, "Status.csv")
+REPORT_CSV      = os.path.join(NWS_DIR, "update_report_{}.csv")
 
 
 def _find_shapefile_zip():
@@ -202,6 +204,91 @@ def addr_match_key(territory_id, number, street, suburb, postal_code, state, apa
         norm_str(state),
         norm_str(apartment_number),
     )
+
+
+# ---------------------------------------------------------------------------
+# Persons notes
+# ---------------------------------------------------------------------------
+def _person_matches_address(person_addr: str, number: str, street: str, postal_code: str) -> bool:
+    """Return True if person_addr represents the same property as (number, street, postal_code).
+
+    Persons.csv Address format: "{Number} {Street} {City} {State} {ZIP}"
+    Match requires:
+      - address starts with the house number (case-insensitive)
+      - last whitespace-delimited token equals the postal code
+      - the normalised street name appears in the normalised middle portion
+    """
+    addr = person_addr.strip()
+    if not addr:
+        return False
+    tokens = addr.split()
+    if len(tokens) < 3:
+        return False
+    if tokens[0].upper() != number.strip().upper():
+        return False
+    if tokens[-1].upper() != postal_code.strip().upper():
+        return False
+    # Middle tokens: everything between the house number and the ZIP code.
+    # This includes street + city (possibly multi-word) + state, so we just
+    # check whether the normalised territory street is a substring.
+    middle = " ".join(tokens[1:-1])
+    street_norm = normalize_street_for_key(street)
+    middle_norm = normalize_street_for_key(middle)
+    return street_norm and street_norm in middle_norm
+
+
+def apply_persons_notes(rows: list) -> list:
+    """Match Persons.csv addresses against territory addresses and write
+    '{LastName} Home' into the Notes field of each matching row.
+
+    FamilyHead=True persons take priority so that, when multiple family
+    members share an address, the head of household's surname is used.
+    If Persons.csv is absent the rows are returned unchanged.
+    """
+    if not os.path.exists(PERSONS_CSV):
+        print("Persons.csv not found, skipping persons notes step.")
+        return rows
+
+    with open(PERSONS_CSV, newline="", encoding="utf-8-sig") as f:
+        persons = list(csv.DictReader(f))
+    print(f"Loaded {len(persons)} persons for notes matching.")
+
+    # Sort so FamilyHead=True entries are processed last (they overwrite non-heads).
+    persons.sort(key=lambda p: p.get("FamilyHead", "").strip().lower() == "true")
+
+    # Build index: (number_upper, postal_code_upper) -> [row_index, ...]
+    addr_index: dict = {}
+    for i, row in enumerate(rows):
+        key = (row.get("Number", "").strip().upper(),
+               row.get("PostalCode", "").strip().upper())
+        addr_index.setdefault(key, []).append(i)
+
+    matched = 0
+    for person in persons:
+        address  = person.get("Address", "").strip()
+        last_name = person.get("LastName", "").strip()
+        if not address or not last_name:
+            continue
+
+        tokens = address.split()
+        if len(tokens) < 3:
+            continue
+
+        key = (tokens[0].upper(), tokens[-1].upper())
+        if key not in addr_index:
+            continue
+
+        for idx in addr_index[key]:
+            row = rows[idx]
+            if _person_matches_address(address,
+                                       row.get("Number", ""),
+                                       row.get("Street", ""),
+                                       row.get("PostalCode", "")):
+                row["Notes"] = f"{last_name} Home"
+                matched += 1
+
+    print(f"Applied persons notes to {matched} address row(s).")
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +555,9 @@ def main():
             removed += 1
 
     print(f"Duplicate rows removed:       {removed}")
+
+    # --- Apply Persons.csv notes ---
+    deduped_rows = apply_persons_notes(deduped_rows)
 
     # --- Write updated CSV ---
     with open(ADDRESSES_CSV, "w", newline="", encoding="utf-8") as f:
