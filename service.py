@@ -53,25 +53,31 @@ BASE      = os.path.dirname(os.path.abspath(__file__))
 NWS_DIR   = os.path.join(BASE, "data", "NWS")
 CAD_DIR   = os.path.join(BASE, "data", "CAD")
 
-CREDENTIALS_FILE = os.path.join(BASE, "data", "credentials.json")
+CREDENTIALS_FILE    = os.path.join(BASE, "data", "credentials.json")
+CREDENTIALS_DEFAULT = os.path.join(BASE, "credentials.json")
 TERRITORIES_CSV  = os.path.join(NWS_DIR, "Territories.csv")
 ADDRESSES_CSV    = os.path.join(NWS_DIR, "TerritoryAddresses.csv")
 SHAPEFILE_ZIP    = os.path.join(CAD_DIR,  "parcels_with_appraisal_data_R5.zip")
 UPDATE_SCRIPT    = os.path.join(BASE, "update_territory_addresses.py")
 
 
-_DEFAULT_CREDENTIALS = os.path.join(BASE, "credentials.json")
+def _init_credentials() -> None:
+    """Write default credentials to data/credentials.json on first start."""
+    if not os.path.exists(CREDENTIALS_FILE):
+        os.makedirs(os.path.dirname(CREDENTIALS_FILE), exist_ok=True)
+        with open(CREDENTIALS_DEFAULT) as src, open(CREDENTIALS_FILE, "w") as dst:
+            dst.write(src.read())
+
+
+_init_credentials()
+
 
 def _load_users() -> dict:
-    for path in (CREDENTIALS_FILE, _DEFAULT_CREDENTIALS):
-        if os.path.exists(path):
-            with open(path) as f:
-                return json.load(f)
-    return {}
+    with open(CREDENTIALS_FILE) as f:
+        return json.load(f)
 
 
 def _save_users(users: dict) -> None:
-    os.makedirs(os.path.dirname(CREDENTIALS_FILE), exist_ok=True)
     with open(CREDENTIALS_FILE, "w") as f:
         json.dump(users, f, indent=2)
 
