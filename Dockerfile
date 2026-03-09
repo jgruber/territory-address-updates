@@ -23,7 +23,7 @@ COPY credentials.json .
 RUN mkdir -p data/NWS data/CAD
 
 # credentials.json and data are kept in named volumes for persistence
-VOLUME ["/app/data", "/app/credentials.json"]
+VOLUME ["/app/data"]
 
 EXPOSE 8000
 
