@@ -329,10 +329,13 @@ def apply_status_updates(rows: list) -> list:
         )
         if not any(key):
             continue
+        status_note = entry.get("Notes", "").strip()
         for idx in addr_index.get(key, []):
             row = rows[idx]
             row["Status"] = entry.get("Status", "")
-            row["Notes"]  = entry.get("Notes", "")
+            if status_note:
+                existing = row.get("Notes", "").strip()
+                row["Notes"] = f"{existing}; {status_note}" if existing else status_note
             matched += 1
 
     print(f"Applied status updates to {matched} address row(s).")
