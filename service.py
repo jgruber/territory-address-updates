@@ -57,8 +57,17 @@ CREDENTIALS_FILE    = os.path.join(BASE, "data", "credentials.json")
 CREDENTIALS_DEFAULT = os.path.join(BASE, "credentials.json")
 TERRITORIES_CSV  = os.path.join(NWS_DIR, "Territories.csv")
 ADDRESSES_CSV    = os.path.join(NWS_DIR, "TerritoryAddresses.csv")
-SHAPEFILE_ZIP    = os.path.join(CAD_DIR,  "parcels_with_appraisal_data_R5.zip")
 UPDATE_SCRIPT    = os.path.join(BASE, "update_territory_addresses.py")
+
+
+def _find_shapefile() -> Optional[str]:
+    """Return path to the first .zip found in CAD_DIR, or None."""
+    if not os.path.isdir(CAD_DIR):
+        return None
+    for name in sorted(os.listdir(CAD_DIR)):
+        if name.endswith(".zip"):
+            return os.path.join(CAD_DIR, name)
+    return None
 
 
 def _init_credentials() -> None:
@@ -177,13 +186,15 @@ def service_status(_user: str = Depends(authenticate)):
     return {
         "service": "Territory Address Update",
         "files": {
-            "shapefile":       os.path.exists(SHAPEFILE_ZIP),
+            "shapefile":       _find_shapefile() is not None,
             "territories_csv": os.path.exists(TERRITORIES_CSV),
             "addresses_csv":   os.path.exists(ADDRESSES_CSV),
         },
-        "ready_to_update": all(
-            os.path.exists(p) for p in [SHAPEFILE_ZIP, TERRITORIES_CSV, ADDRESSES_CSV]
-        ),
+        "ready_to_update": all([
+            _find_shapefile() is not None,
+            os.path.exists(TERRITORIES_CSV),
+            os.path.exists(ADDRESSES_CSV),
+        ]),
         "update_status": _update_state.status,
     }
 
@@ -248,10 +259,15 @@ async def upload_shapefile(
     if not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="File must be a .zip archive")
     os.makedirs(CAD_DIR, exist_ok=True)
-    with open(SHAPEFILE_ZIP, "wb") as f:
+    # Remove any existing zip before saving the new one
+    existing = _find_shapefile()
+    if existing:
+        os.remove(existing)
+    dest = os.path.join(CAD_DIR, file.filename)
+    with open(dest, "wb") as f:
         f.write(await file.read())
-    size = os.path.getsize(SHAPEFILE_ZIP)
-    return {"message": "Shapefile uploaded", "saved_as": os.path.basename(SHAPEFILE_ZIP), "bytes": size}
+    size = os.path.getsize(dest)
+    return {"message": "Shapefile uploaded", "saved_as": file.filename, "bytes": size}
 
 
 @app.post("/upload/territories", summary="Upload Territories.csv")
@@ -288,13 +304,16 @@ def upload_status(_user: str = Depends(authenticate)):
             }
         return {"present": False}
 
+    shapefile_path = _find_shapefile()
     return {
-        "shapefile":       _info(SHAPEFILE_ZIP),
+        "shapefile":       _info(shapefile_path) if shapefile_path else {"present": False},
         "territories_csv": _info(TERRITORIES_CSV),
         "addresses_csv":   _info(ADDRESSES_CSV),
-        "ready_to_update": all(
-            os.path.exists(p) for p in [SHAPEFILE_ZIP, TERRITORIES_CSV, ADDRESSES_CSV]
-        ),
+        "ready_to_update": all([
+            shapefile_path is not None,
+            os.path.exists(TERRITORIES_CSV),
+            os.path.exists(ADDRESSES_CSV),
+        ]),
     }
 
 
@@ -303,14 +322,13 @@ def upload_status(_user: str = Depends(authenticate)):
 # ---------------------------------------------------------------------------
 @app.post("/update", summary="Start the territory address update job")
 def trigger_update(_user: str = Depends(authenticate)):
-    missing = [
-        name for name, path in [
-            ("shapefile",       SHAPEFILE_ZIP),
-            ("territories_csv", TERRITORIES_CSV),
-            ("addresses_csv",   ADDRESSES_CSV),
-        ]
-        if not os.path.exists(path)
-    ]
+    missing = []
+    if not _find_shapefile():
+        missing.append("shapefile")
+    if not os.path.exists(TERRITORIES_CSV):
+        missing.append("territories_csv")
+    if not os.path.exists(ADDRESSES_CSV):
+        missing.append("addresses_csv")
     if missing:
         raise HTTPException(
             status_code=400,
@@ -350,7 +368,7 @@ async def query_street(
     q: str = Query(..., description='Street name, e.g. "Jupiter Rd" or "Edgewood Ln, Allen"'),
     _user: str = Depends(authenticate),
 ):
-    if not os.path.exists(SHAPEFILE_ZIP):
+    if not _find_shapefile():
         raise HTTPException(status_code=400, detail="Shapefile not uploaded yet. POST /upload/shapefile first.")
     if not q.strip():
         raise HTTPException(status_code=400, detail="Query parameter 'q' must not be empty.")
@@ -409,7 +427,8 @@ def delete_files(_user: str = Depends(authenticate)):
 
     deleted = []
 
-    for path in [SHAPEFILE_ZIP, TERRITORIES_CSV, ADDRESSES_CSV]:
+    shapefile_path = _find_shapefile()
+    for path in filter(None, [shapefile_path, TERRITORIES_CSV, ADDRESSES_CSV]):
         if os.path.exists(path):
             os.remove(path)
             deleted.append(os.path.basename(path))

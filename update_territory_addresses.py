@@ -28,9 +28,21 @@ CAD_DIR = os.path.join(BASE, "data", "CAD")
 
 TERRITORIES_CSV = os.path.join(NWS_DIR, "Territories.csv")
 ADDRESSES_CSV = os.path.join(NWS_DIR, "TerritoryAddresses.csv")
-SHAPEFILE_ZIP = os.path.join(CAD_DIR, "parcels_with_appraisal_data_R5.zip")
-SHAPEFILE_BASE = "parcels_with_appraisal_data_R5/parcels_with_appraisal_data_R5"
 REPORT_CSV = os.path.join(NWS_DIR, "update_report_{}.csv")
+
+
+def _find_shapefile_zip():
+    """Return (zip_path, internal_base) for the first .zip found in CAD_DIR, or (None, None)."""
+    if not os.path.isdir(CAD_DIR):
+        return None, None
+    for name in sorted(os.listdir(CAD_DIR)):
+        if name.endswith(".zip"):
+            zip_path = os.path.join(CAD_DIR, name)
+            with zipfile.ZipFile(zip_path) as zf:
+                for entry in zf.namelist():
+                    if entry.endswith(".shp"):
+                        return zip_path, entry[:-4]
+    return None, None
 
 # ---------------------------------------------------------------------------
 # Street abbreviation expansion (shape data → human-readable)
@@ -244,16 +256,22 @@ def main():
         )
         existing_index.setdefault(key, []).append(row)
 
+    # --- Locate shapefile zip ---
+    zip_path, shp_base = _find_shapefile_zip()
+    if not zip_path:
+        raise FileNotFoundError(f"No shapefile ZIP found in {CAD_DIR}")
+    print(f"Using shapefile: {zip_path} (base: {shp_base})")
+
     # --- Set up coordinate transformer ---
     # Shape: NAD83 State Plane TX North Central (EPSG:2276, US survey feet)
     # Target: WGS84 geographic (EPSG:4326)
     transformer = Transformer.from_crs("EPSG:2276", "EPSG:4326", always_xy=True)
 
     # --- Open shapefile ---
-    with zipfile.ZipFile(SHAPEFILE_ZIP) as zf:
-        shp_data = io.BytesIO(zf.read(SHAPEFILE_BASE + ".shp"))
-        dbf_data = io.BytesIO(zf.read(SHAPEFILE_BASE + ".dbf"))
-        shx_data = io.BytesIO(zf.read(SHAPEFILE_BASE + ".shx"))
+    with zipfile.ZipFile(zip_path) as zf:
+        shp_data = io.BytesIO(zf.read(shp_base + ".shp"))
+        dbf_data = io.BytesIO(zf.read(shp_base + ".dbf"))
+        shx_data = io.BytesIO(zf.read(shp_base + ".shx"))
         sf = shapefile.Reader(shp=shp_data, dbf=dbf_data, shx=shx_data)
         field_names = [f[0] for f in sf.fields[1:]]
         total = len(sf)
