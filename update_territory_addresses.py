@@ -292,6 +292,54 @@ def apply_persons_notes(rows: list) -> list:
 
 
 # ---------------------------------------------------------------------------
+# Status updates
+# ---------------------------------------------------------------------------
+def apply_status_updates(rows: list) -> list:
+    """Match Status.csv rows to territory addresses by (Number, Street, PostalCode)
+    and overwrite the Status and Notes fields on each matched row.
+
+    Street matching uses the same abbreviation-normalisation as the rest of
+    the pipeline so 'W Bethany Dr' and 'West Bethany Drive' compare equal.
+    If Status.csv is absent the rows are returned unchanged.
+    """
+    if not os.path.exists(STATUS_CSV):
+        print("Status.csv not found, skipping status update step.")
+        return rows
+
+    with open(STATUS_CSV, newline="", encoding="utf-8-sig") as f:
+        status_rows = list(csv.DictReader(f))
+    print(f"Loaded {len(status_rows)} status entries.")
+
+    # Build index: (number_upper, street_norm, postal_code_upper) -> [row_index, ...]
+    addr_index: dict = {}
+    for i, row in enumerate(rows):
+        key = (
+            row.get("Number", "").strip().upper(),
+            normalize_street_for_key(row.get("Street", "")),
+            row.get("PostalCode", "").strip().upper(),
+        )
+        addr_index.setdefault(key, []).append(i)
+
+    matched = 0
+    for entry in status_rows:
+        key = (
+            entry.get("Number", "").strip().upper(),
+            normalize_street_for_key(entry.get("Street", "")),
+            entry.get("PostalCode", "").strip().upper(),
+        )
+        if not any(key):
+            continue
+        for idx in addr_index.get(key, []):
+            row = rows[idx]
+            row["Status"] = entry.get("Status", "")
+            row["Notes"]  = entry.get("Notes", "")
+            matched += 1
+
+    print(f"Applied status updates to {matched} address row(s).")
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
@@ -556,8 +604,9 @@ def main():
 
     print(f"Duplicate rows removed:       {removed}")
 
-    # --- Apply Persons.csv notes ---
+    # --- Apply optional enrichment steps ---
     deduped_rows = apply_persons_notes(deduped_rows)
+    deduped_rows = apply_status_updates(deduped_rows)
 
     # --- Write updated CSV ---
     with open(ADDRESSES_CSV, "w", newline="", encoding="utf-8") as f:
