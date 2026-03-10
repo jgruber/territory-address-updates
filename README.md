@@ -4,15 +4,24 @@ A REST service that matches parcel shapefile data to congregation territory boun
 
 ## Overview
 
-The service reads three data sources:
+The service reads five data sources:
 
-| File | Purpose |
-|------|---------|
-| `data/NWS/Territories.csv` | Territory definitions with polygon boundary coordinates |
-| `data/NWS/TerritoryAddresses.csv` | Current address list to be kept up to date |
-| `data/CAD/parcels_with_appraisal_data_R5.zip` | ESRI Shapefile of all parcels (430 k+ records) |
+| File | Required | Source | Purpose |
+|------|----------|--------|---------|
+| `data/NWS/Territories.csv` | Yes | New World Scheduler export | Territory definitions with polygon boundary coordinates |
+| `data/NWS/TerritoryAddresses.csv` | Yes | New World Scheduler export | Current address list to be kept up to date |
+| `data/NWS/Persons.csv` | Optional | New World Scheduler export | Congregation member records used to annotate territory addresses with resident surnames |
+| `data/NWS/Status.csv` | Optional | Manually maintained | Per-address status and notes overrides |
+| `data/CAD/<name>.zip` | Yes | County appraisal district / county records | ESRI Shapefile of all parcels |
 
-For each territory the update script performs a point-in-polygon test against the shapefile centroids, then adds, updates, or removes rows in `TerritoryAddresses.csv` accordingly. A timestamped report CSV is written to `data/NWS/` after every run.
+`Territories.csv`, `TerritoryAddresses.csv`, and `Persons.csv` are exported directly from **New World Scheduler**. The parcel shapefile is typically available as a free download from the county appraisal district or county records office for the area covered by the congregation's territories.
+
+For each territory the update script performs a point-in-polygon test against the shapefile centroids, then adds, updates, or removes rows in `TerritoryAddresses.csv` accordingly. After the shapefile pass, two optional enrichment steps run:
+
+1. **Persons.csv** — matches each member's address to a territory address by house number, street name, and postal code, then writes `{LastName} Home` into the `Notes` field.
+2. **Status.csv** — matches rows by house number, street name, and postal code, then overwrites the `Status` field and appends to the `Notes` field of each matching territory address.
+
+A timestamped report CSV is written to `data/NWS/` after every run.
 
 ## Quick Start
 
@@ -32,8 +41,7 @@ docker build -t territory-address-updates .
 
 docker run -d \
   -p 8000:8000 \
-  -v "$(pwd)/data:/app/data" \
-  -v "$(pwd)/users.json:/app/users.json" \
+  -v /data/territory-address-updates:/app/data \
   --name territory-address-updates \
   territory-address-updates
 ```
@@ -45,7 +53,7 @@ Data and user credentials are persisted via the mounted volumes and survive cont
 Navigate to `http://localhost:8000` for the full-featured web interface:
 
 - **Dashboard** — file readiness and last update status at a glance
-- **Files** — drag-and-drop upload for all three required files; delete all uploaded files
+- **Files** — drag-and-drop upload for all five files; delete all uploaded files
 - **Update** — trigger the address update job, watch live log output, download results
 - **Query** — search the shapefile by street name (e.g. `Jupiter Rd` or `Edgewood Ln, Allen`)
 - **Users** — add users, change passwords, delete accounts
@@ -65,6 +73,8 @@ All endpoints except `GET /` require HTTP Basic authentication.
 | POST | `/upload/shapefile` | Upload parcel shapefile ZIP |
 | POST | `/upload/territories` | Upload `Territories.csv` |
 | POST | `/upload/addresses` | Upload `TerritoryAddresses.csv` |
+| POST | `/upload/persons` | Upload `Persons.csv` (optional) |
+| POST | `/upload/status-file` | Upload `Status.csv` (optional) |
 | GET | `/upload/status` | Check which files are present |
 | POST | `/update` | Start the address update job (background) |
 | GET | `/update/status` | Poll job status and retrieve log |
@@ -105,6 +115,19 @@ python query_shape_street.py --box "lon [-96.7365, -96.6373] lat [33.0726, 33.13
 - Territory boundaries are stored as `[lon,lat]` polygon vertex lists in `Territories.csv`.
 - Street name matching expands USPS abbreviations (e.g. `LN → LANE`, `S → SOUTH`) so searches are abbreviation-agnostic.
 - The match key used for deduplication is: TerritoryID + Number + Street (normalized) + Suburb + PostalCode + State + ApartmentNumber.
+
+### Status.csv Format
+
+`Status.csv` is a manually maintained file that applies status and note overrides to specific addresses. Rows are matched to territory addresses by `Number`, `Street`, and `PostalCode`.
+
+| Column | Description |
+|--------|-------------|
+| `Number` | House or unit number (e.g. `610`) |
+| `Street` | Street name — abbreviations are expanded automatically (e.g. `W Bethany Dr` matches `West Bethany Drive`) |
+| `PostalCode` | ZIP code (e.g. `75013`) |
+| `State` | Two-letter state code (e.g. `TX`) |
+| `Status` | Address status. Common values: `Available`, `DoNotCall`, `Home`, `NotHome`, `Custom1`, `Custom2`, `Custom3` |
+| `Notes` | Optional free-text note (e.g. `Vacant`, `Smith Family`). If the territory address record already has notes, this value is appended after `; ` rather than replacing the existing content. Blank values are ignored. |
 
 ## Requirements
 
