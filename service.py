@@ -96,20 +96,28 @@ def _save_users(users: dict) -> None:
 # ---------------------------------------------------------------------------
 # Authentication
 # ---------------------------------------------------------------------------
-security = HTTPBasic()
+security = HTTPBasic(auto_error=False)
+
+# Use a non-Basic scheme so the browser never shows its native auth popup.
+_AUTH_HEADER = {"WWW-Authenticate": "x-basic"}
 
 
-def authenticate(credentials: HTTPBasicCredentials = Depends(security)) -> str:
+def authenticate(credentials: Optional[HTTPBasicCredentials] = Depends(security)) -> str:
     """Validate HTTP Basic credentials and return the authenticated username."""
-    users = _load_users()
-    user = credentials.username
-    if user not in users or users[user] != credentials.password:
+    if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Basic"},
+            headers=_AUTH_HEADER,
         )
-    return user
+    users = _load_users()
+    if credentials.username not in users or users[credentials.username] != credentials.password:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+            headers=_AUTH_HEADER,
+        )
+    return credentials.username
 
 
 # ---------------------------------------------------------------------------
