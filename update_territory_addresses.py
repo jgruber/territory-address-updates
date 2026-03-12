@@ -281,6 +281,18 @@ def apply_persons_notes(rows: list, changed_row_ids: set) -> tuple:
         persons = list(csv.DictReader(f))
     print(f"Loaded {len(persons)} persons for notes matching.")
 
+    # Clear any previously written '{X} Home' notes before applying fresh data.
+    # Track cleared rows so they are marked as changed even if Persons.csv no
+    # longer has a matching entry for them.
+    cleared = 0
+    for row in rows:
+        if re.fullmatch(r".+ Home", row.get("Notes", "").strip()):
+            row["Notes"] = ""
+            changed_row_ids.add(id(row))
+            cleared += 1
+    if cleared:
+        print(f"Cleared {cleared} existing 'X Home' note(s) before reapplying.")
+
     # Sort so FamilyHead=True entries are processed last (they overwrite non-heads).
     persons.sort(key=lambda p: p.get("FamilyHead", "").strip().lower() == "true")
 
