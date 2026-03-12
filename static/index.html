@@ -314,6 +314,33 @@
           </div>
         </div>
 
+        <!-- OFF Addresses -->
+        <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
+          <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
+            <span class="text-xl">👮</span>
+            <div>
+              <div class="text-white font-semibold text-sm">OFF Addresses</div>
+              <div class="text-slate-400 text-xs">Address.txt</div>
+            </div>
+          </div>
+          <div class="p-4 flex-1 flex flex-col gap-3">
+            <div id="fs-off" class="text-xs text-gray-400">Checking…</div>
+            <div id="dz-off"
+              class="drop-zone flex-1 border-2 border-dashed border-gray-200 rounded-xl p-5 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all"
+              onclick="document.getElementById('fi-off').click()">
+              <div class="text-gray-300 text-xs">Drop file here or click to browse</div>
+              <input id="fi-off" type="file" accept=".txt" class="hidden"
+                onchange="handleFileInput(this, '/upload/off-file')" />
+            </div>
+            <div id="prog-off" class="hidden space-y-1">
+              <div class="h-1.5 bg-blue-100 rounded-full overflow-hidden">
+                <div class="h-full bg-blue-500 rounded-full w-full animate-pulse"></div>
+              </div>
+              <div class="text-xs text-gray-400 text-center">Uploading…</div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </section>
 
@@ -638,6 +665,7 @@ async function loadDashboard() {
       { key: 'addresses_csv',   label: 'Territory Addresses',  icon: '📍' },
       { key: 'persons_csv',     label: 'Persons CSV',          icon: '👥' },
       { key: 'status_csv',      label: 'Status CSV',           icon: '🏷️' },
+      { key: 'off_file',        label: 'OFF Addresses',        icon: '👮' },
     ];
     document.getElementById('db-file-cards').innerHTML = defs.map(d => {
       const f = st[d.key];
@@ -675,6 +703,7 @@ async function loadFiles() {
     renderFileStat('fs-addresses',    st.addresses_csv);
     renderFileStat('fs-persons',      st.persons_csv);
     renderFileStat('fs-status',       st.status_csv);
+    renderFileStat('fs-off',          st.off_file);
   } catch (_) {}
 }
 
@@ -706,7 +735,7 @@ function handleFileInput(input, endpoint) {
 async function uploadFile(file, endpoint) {
   const key = { '/upload/shapefile': 'shapefile', '/upload/territories': 'territories',
                 '/upload/addresses': 'addresses', '/upload/persons': 'persons',
-                '/upload/status-file': 'status' }[endpoint];
+                '/upload/status-file': 'status', '/upload/off-file': 'off' }[endpoint];
   const progEl = document.getElementById('prog-' + key);
   progEl?.classList.remove('hidden');
   try {
@@ -984,6 +1013,7 @@ function bootApp() {
   wireDrop('dz-addresses',    '/upload/addresses');
   wireDrop('dz-persons',      '/upload/persons');
   wireDrop('dz-status',       '/upload/status-file');
+  wireDrop('dz-off',          '/upload/off-file');
   showSection('dashboard');
   // Resume polling if update was already running
   apiJson('GET', '/update/status').then(upd => {

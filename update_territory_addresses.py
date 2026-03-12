@@ -25,11 +25,13 @@ from pyproj import Transformer
 BASE = os.path.dirname(os.path.abspath(__file__))
 NWS_DIR = os.path.join(BASE, "data", "NWS")
 CAD_DIR = os.path.join(BASE, "data", "CAD")
+OFF_DIR = os.path.join(BASE, "data", "OFF")
 
 TERRITORIES_CSV = os.path.join(NWS_DIR, "Territories.csv")
 ADDRESSES_CSV   = os.path.join(NWS_DIR, "TerritoryAddresses.csv")
 PERSONS_CSV     = os.path.join(NWS_DIR, "Persons.csv")
 STATUS_CSV      = os.path.join(NWS_DIR, "Status.csv")
+OFF_FILE        = os.path.join(OFF_DIR, "Address.txt")
 REPORT_CSV      = os.path.join(NWS_DIR, "update_report_{}.csv")
 
 
@@ -207,6 +209,28 @@ def addr_match_key(territory_id, number, street, suburb, postal_code, state, apa
 
 
 # ---------------------------------------------------------------------------
+# Report entry helper
+# ---------------------------------------------------------------------------
+def _make_report_entry(row: dict, changed_fields: str) -> dict:
+    return {
+        "ChangeType":         "Updated",
+        "TerritoryID":        row.get("TerritoryID", ""),
+        "TerritoryNumber":    row.get("TerritoryNumber", ""),
+        "CategoryCode":       row.get("CategoryCode", ""),
+        "TerritoryAddressID": row.get("TerritoryAddressID", ""),
+        "ApartmentNumber":    row.get("ApartmentNumber", ""),
+        "Number":             row.get("Number", ""),
+        "Street":             row.get("Street", ""),
+        "Suburb":             row.get("Suburb", ""),
+        "PostalCode":         row.get("PostalCode", ""),
+        "State":              row.get("State", ""),
+        "Latitude":           row.get("Latitude", ""),
+        "Longitude":          row.get("Longitude", ""),
+        "ChangedFields":      changed_fields,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Persons notes
 # ---------------------------------------------------------------------------
 def _person_matches_address(person_addr: str, number: str, street: str, postal_code: str) -> bool:
@@ -237,17 +261,19 @@ def _person_matches_address(person_addr: str, number: str, street: str, postal_c
     return street_norm and street_norm in middle_norm
 
 
-def apply_persons_notes(rows: list) -> list:
+def apply_persons_notes(rows: list) -> tuple:
     """Match Persons.csv addresses against territory addresses and write
     '{LastName} Home' into the Notes field of each matching row.
 
     FamilyHead=True persons take priority so that, when multiple family
     members share an address, the head of household's surname is used.
     If Persons.csv is absent the rows are returned unchanged.
+
+    Returns (rows, report_entries).
     """
     if not os.path.exists(PERSONS_CSV):
         print("Persons.csv not found, skipping persons notes step.")
-        return rows
+        return rows, []
 
     with open(PERSONS_CSV, newline="", encoding="utf-8-sig") as f:
         persons = list(csv.DictReader(f))
@@ -263,6 +289,7 @@ def apply_persons_notes(rows: list) -> list:
                row.get("PostalCode", "").strip().upper())
         addr_index.setdefault(key, []).append(i)
 
+    entries = []
     matched = 0
     for person in persons:
         address  = person.get("Address", "").strip()
@@ -284,27 +311,33 @@ def apply_persons_notes(rows: list) -> list:
                                        row.get("Number", ""),
                                        row.get("Street", ""),
                                        row.get("PostalCode", "")):
-                row["Notes"] = f"{last_name} Home"
+                old_notes = row.get("Notes", "")
+                new_notes = f"{last_name} Home"
+                row["Notes"] = new_notes
+                entries.append(_make_report_entry(
+                    row, f"Notes: {old_notes!r} → {new_notes!r}"))
                 matched += 1
 
     print(f"Applied persons notes to {matched} address row(s).")
-    return rows
+    return rows, entries
 
 
 # ---------------------------------------------------------------------------
 # Status updates
 # ---------------------------------------------------------------------------
-def apply_status_updates(rows: list) -> list:
+def apply_status_updates(rows: list) -> tuple:
     """Match Status.csv rows to territory addresses by (Number, Street, PostalCode)
     and overwrite the Status and Notes fields on each matched row.
 
     Street matching uses the same abbreviation-normalisation as the rest of
     the pipeline so 'W Bethany Dr' and 'West Bethany Drive' compare equal.
     If Status.csv is absent the rows are returned unchanged.
+
+    Returns (rows, report_entries).
     """
     if not os.path.exists(STATUS_CSV):
         print("Status.csv not found, skipping status update step.")
-        return rows
+        return rows, []
 
     with open(STATUS_CSV, newline="", encoding="utf-8-sig") as f:
         status_rows = list(csv.DictReader(f))
@@ -320,6 +353,7 @@ def apply_status_updates(rows: list) -> list:
         )
         addr_index.setdefault(key, []).append(i)
 
+    entries = []
     matched = 0
     for entry in status_rows:
         key = (
@@ -329,17 +363,111 @@ def apply_status_updates(rows: list) -> list:
         )
         if not any(key):
             continue
+        new_status  = entry.get("Status", "")
         status_note = entry.get("Notes", "").strip()
         for idx in addr_index.get(key, []):
             row = rows[idx]
-            row["Status"] = entry.get("Status", "")
+            changed = []
+            old_status = row.get("Status", "")
+            if old_status != new_status:
+                changed.append(f"Status: {old_status!r} → {new_status!r}")
+                row["Status"] = new_status
             if status_note:
-                existing = row.get("Notes", "").strip()
-                row["Notes"] = f"{existing}; {status_note}" if existing else status_note
+                old_notes = row.get("Notes", "").strip()
+                new_notes = f"{old_notes}; {status_note}" if old_notes else status_note
+                if old_notes != new_notes:
+                    changed.append(f"Notes: {old_notes!r} → {new_notes!r}")
+                row["Notes"] = new_notes
+            if changed:
+                entries.append(_make_report_entry(row, "; ".join(changed)))
             matched += 1
 
     print(f"Applied status updates to {matched} address row(s).")
-    return rows
+    return rows, entries
+
+
+# ---------------------------------------------------------------------------
+# OFF address updates
+# ---------------------------------------------------------------------------
+def apply_off_updates(rows: list) -> tuple:
+    """Reset previous OFF markings, then apply new ones from Address.txt.
+
+    Step 1: Territory addresses with Status='Custom1' and Notes containing
+            the 'OFF' tag are reset to Status='Available' with 'OFF' removed.
+    Step 2: Records in Address.txt that match a territory address by
+            (Number, Street, PostalCode) get Status='Custom1' and 'OFF'
+            appended to Notes.
+
+    Address.txt is tab-delimited with (0-indexed):
+      [2]=house number, [3]=street name, [6]=city, [7]=state,
+      [8]=postal code, [10]=latitude, [11]=longitude
+    If Address.txt is absent the rows are returned unchanged.
+
+    Returns (rows, report_entries).
+    """
+    if not os.path.exists(OFF_FILE):
+        print("Address.txt not found, skipping OFF update step.")
+        return rows, []
+
+    entries = []
+
+    # Step 1: Reset existing OFF markings
+    reset_count = 0
+    for row in rows:
+        if row.get("Status", "") == "Custom1":
+            parts = [p.strip() for p in row.get("Notes", "").split(";")]
+            if "OFF" in parts:
+                old_status = row["Status"]
+                old_notes  = row.get("Notes", "")
+                row["Status"] = "Available"
+                parts = [p for p in parts if p != "OFF"]
+                row["Notes"] = "; ".join(p for p in parts if p)
+                changed = [f"Status: {old_status!r} → 'Available'",
+                           f"Notes: {old_notes!r} → {row['Notes']!r}"]
+                entries.append(_make_report_entry(row, "; ".join(changed)))
+                reset_count += 1
+    print(f"Reset {reset_count} previous OFF address row(s).")
+
+    # Build address index from territory rows
+    # key: (number_upper, street_norm, postal_code_upper) -> [row_index, ...]
+    addr_index: dict = {}
+    for i, row in enumerate(rows):
+        key = (
+            row.get("Number", "").strip().upper(),
+            normalize_street_for_key(row.get("Street", "")),
+            row.get("PostalCode", "").strip().upper(),
+        )
+        addr_index.setdefault(key, []).append(i)
+
+    # Step 2: Load Address.txt and apply OFF markings
+    with open(OFF_FILE, encoding="utf-8", errors="replace") as f:
+        off_lines = f.readlines()
+    print(f"Loaded {len(off_lines)} Address.txt entries.")
+
+    matched = 0
+    for line in off_lines:
+        fields = line.rstrip("\r\n").split("\t")
+        if len(fields) <= 8:
+            continue
+        house       = fields[2].strip() if len(fields) > 2 else ""
+        street      = fields[3].strip() if len(fields) > 3 else ""
+        postal_code = fields[8].strip() if len(fields) > 8 else ""
+        if not house or not street or not postal_code:
+            continue
+        key = (house.upper(), normalize_street_for_key(street), postal_code.upper())
+        for idx in addr_index.get(key, []):
+            row = rows[idx]
+            old_status = row.get("Status", "")
+            old_notes  = row.get("Notes", "").strip()
+            row["Status"] = "Custom1"
+            row["Notes"]  = f"{old_notes}; OFF" if old_notes else "OFF"
+            changed = [f"Status: {old_status!r} → 'Custom1'",
+                       f"Notes: {old_notes!r} → {row['Notes']!r}"]
+            entries.append(_make_report_entry(row, "; ".join(changed)))
+            matched += 1
+
+    print(f"Applied OFF updates to {matched} address row(s).")
+    return rows, entries
 
 
 # ---------------------------------------------------------------------------
@@ -608,8 +736,12 @@ def main():
     print(f"Duplicate rows removed:       {removed}")
 
     # --- Apply optional enrichment steps ---
-    deduped_rows = apply_persons_notes(deduped_rows)
-    deduped_rows = apply_status_updates(deduped_rows)
+    deduped_rows, persons_entries = apply_persons_notes(deduped_rows)
+    deduped_rows, status_entries  = apply_status_updates(deduped_rows)
+    deduped_rows, off_entries     = apply_off_updates(deduped_rows)
+    report_entries.extend(persons_entries)
+    report_entries.extend(status_entries)
+    report_entries.extend(off_entries)
 
     # --- Write updated CSV ---
     with open(ADDRESSES_CSV, "w", newline="", encoding="utf-8") as f:

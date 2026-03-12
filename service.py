@@ -52,6 +52,7 @@ from pydantic import BaseModel
 BASE      = os.path.dirname(os.path.abspath(__file__))
 NWS_DIR   = os.path.join(BASE, "data", "NWS")
 CAD_DIR   = os.path.join(BASE, "data", "CAD")
+OFF_DIR   = os.path.join(BASE, "data", "OFF")
 
 CREDENTIALS_FILE    = os.path.join(BASE, "data", "credentials.json")
 CREDENTIALS_DEFAULT = os.path.join(BASE, "credentials.json")
@@ -59,6 +60,7 @@ TERRITORIES_CSV  = os.path.join(NWS_DIR, "Territories.csv")
 ADDRESSES_CSV    = os.path.join(NWS_DIR, "TerritoryAddresses.csv")
 PERSONS_CSV      = os.path.join(NWS_DIR, "Persons.csv")
 STATUS_CSV       = os.path.join(NWS_DIR, "Status.csv")
+OFF_FILE         = os.path.join(OFF_DIR, "Address.txt")
 UPDATE_SCRIPT    = os.path.join(BASE, "update_territory_addresses.py")
 
 
@@ -324,6 +326,17 @@ async def upload_status_file(
     return {"message": "Status.csv uploaded", "bytes": os.path.getsize(STATUS_CSV)}
 
 
+@app.post("/upload/off-file", summary="Upload Address.txt (OFF)")
+async def upload_off_file(
+    file: UploadFile = File(...),
+    _user: str = Depends(authenticate),
+):
+    os.makedirs(OFF_DIR, exist_ok=True)
+    with open(OFF_FILE, "wb") as f:
+        f.write(await file.read())
+    return {"message": "Address.txt uploaded", "bytes": os.path.getsize(OFF_FILE)}
+
+
 @app.get("/upload/status", summary="Check which files are present")
 def upload_status(_user: str = Depends(authenticate)):
     def _info(path: str) -> dict:
@@ -343,6 +356,7 @@ def upload_status(_user: str = Depends(authenticate)):
         "addresses_csv":   _info(ADDRESSES_CSV),
         "persons_csv":     _info(PERSONS_CSV),
         "status_csv":      _info(STATUS_CSV),
+        "off_file":        _info(OFF_FILE),
         "ready_to_update": all([
             shapefile_path is not None,
             os.path.exists(TERRITORIES_CSV),
@@ -462,7 +476,7 @@ def delete_files(_user: str = Depends(authenticate)):
     deleted = []
 
     shapefile_path = _find_shapefile()
-    for path in filter(None, [shapefile_path, TERRITORIES_CSV, ADDRESSES_CSV, PERSONS_CSV, STATUS_CSV]):
+    for path in filter(None, [shapefile_path, TERRITORIES_CSV, ADDRESSES_CSV, PERSONS_CSV, STATUS_CSV, OFF_FILE]):
         if os.path.exists(path):
             os.remove(path)
             deleted.append(os.path.basename(path))
