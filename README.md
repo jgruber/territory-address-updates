@@ -129,6 +129,22 @@ python query_shape_street.py --box "lon [-96.7365, -96.6373] lat [33.0726, 33.13
 | `Status` | Address status. Common values: `Available`, `DoNotCall`, `Home`, `NotHome`, `Custom1`, `Custom2`, `Custom3` |
 | `Notes` | Optional free-text note (e.g. `Vacant`, `Smith Family`). If the territory address record already has notes, this value is appended after `; ` rather than replacing the existing content. Blank values are ignored. |
 
+## Address Status Values
+
+The following status values are used in `TerritoryAddresses.csv`. The `Custom1`–`Custom3` values have assumed meanings specific to this workflow:
+
+| Status | Meaning |
+|--------|---------|
+| `Available` | Address is available for normal territory work |
+| `DoNotCall` | Do not call at this address |
+| `Home` | Householder is a congregation member |
+| `NotHome` | Householder was not home on the last visit |
+| `Custom1` | No Trespassing |
+| `Custom2` | Elder Only |
+| `Custom3` | Gated |
+
+> **Note:** `Custom2` (Elder Only) is applied automatically by the OFF address processing step when a match is found in `data/OFF/Address.txt`. Previous `Custom2` markings with an `OFF` note are reset to `Available` at the start of each OFF processing run.
+
 ## Requirements
 
 - Python 3.10+

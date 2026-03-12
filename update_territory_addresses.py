@@ -7,6 +7,7 @@ whose centroid falls within the territory boundary, then adds or updates rows in
 TerritoryAddresses.csv with the current shape data as authoritative.
 """
 
+import argparse
 import csv
 import io
 import json
@@ -33,6 +34,7 @@ PERSONS_CSV     = os.path.join(NWS_DIR, "Persons.csv")
 STATUS_CSV      = os.path.join(NWS_DIR, "Status.csv")
 OFF_FILE        = os.path.join(OFF_DIR, "Address.txt")
 REPORT_CSV      = os.path.join(NWS_DIR, "update_report_{}.csv")
+CHANGES_CSV     = os.path.join(NWS_DIR, "TerritoryAddressesChanges.csv")
 
 
 def _find_shapefile_zip():
@@ -261,7 +263,7 @@ def _person_matches_address(person_addr: str, number: str, street: str, postal_c
     return street_norm and street_norm in middle_norm
 
 
-def apply_persons_notes(rows: list) -> tuple:
+def apply_persons_notes(rows: list, changed_row_ids: set) -> tuple:
     """Match Persons.csv addresses against territory addresses and write
     '{LastName} Home' into the Notes field of each matching row.
 
@@ -314,6 +316,7 @@ def apply_persons_notes(rows: list) -> tuple:
                 old_notes = row.get("Notes", "")
                 new_notes = f"{last_name} Home"
                 row["Notes"] = new_notes
+                changed_row_ids.add(id(row))
                 entries.append(_make_report_entry(
                     row, f"Notes: {old_notes!r} → {new_notes!r}"))
                 matched += 1
@@ -325,7 +328,7 @@ def apply_persons_notes(rows: list) -> tuple:
 # ---------------------------------------------------------------------------
 # Status updates
 # ---------------------------------------------------------------------------
-def apply_status_updates(rows: list) -> tuple:
+def apply_status_updates(rows: list, changed_row_ids: set) -> tuple:
     """Match Status.csv rows to territory addresses by (Number, Street, PostalCode)
     and overwrite the Status and Notes fields on each matched row.
 
@@ -379,6 +382,7 @@ def apply_status_updates(rows: list) -> tuple:
                     changed.append(f"Notes: {old_notes!r} → {new_notes!r}")
                 row["Notes"] = new_notes
             if changed:
+                changed_row_ids.add(id(row))
                 entries.append(_make_report_entry(row, "; ".join(changed)))
             matched += 1
 
@@ -389,13 +393,13 @@ def apply_status_updates(rows: list) -> tuple:
 # ---------------------------------------------------------------------------
 # OFF address updates
 # ---------------------------------------------------------------------------
-def apply_off_updates(rows: list) -> tuple:
+def apply_off_updates(rows: list, changed_row_ids: set) -> tuple:
     """Reset previous OFF markings, then apply new ones from Address.txt.
 
-    Step 1: Territory addresses with Status='Custom1' and Notes containing
+    Step 1: Territory addresses with Status='Custom2' and Notes containing
             the 'OFF' tag are reset to Status='Available' with 'OFF' removed.
     Step 2: Records in Address.txt that match a territory address by
-            (Number, Street, PostalCode) get Status='Custom1' and 'OFF'
+            (Number, Street, PostalCode) get Status='Custom2' and 'OFF'
             appended to Notes.
 
     Address.txt is tab-delimited with (0-indexed):
@@ -414,7 +418,7 @@ def apply_off_updates(rows: list) -> tuple:
     # Step 1: Reset existing OFF markings
     reset_count = 0
     for row in rows:
-        if row.get("Status", "") == "Custom1":
+        if row.get("Status", "") == "Custom2":
             parts = [p.strip() for p in row.get("Notes", "").split(";")]
             if "OFF" in parts:
                 old_status = row["Status"]
@@ -424,6 +428,7 @@ def apply_off_updates(rows: list) -> tuple:
                 row["Notes"] = "; ".join(p for p in parts if p)
                 changed = [f"Status: {old_status!r} → 'Available'",
                            f"Notes: {old_notes!r} → {row['Notes']!r}"]
+                changed_row_ids.add(id(row))
                 entries.append(_make_report_entry(row, "; ".join(changed)))
                 reset_count += 1
     print(f"Reset {reset_count} previous OFF address row(s).")
@@ -459,10 +464,11 @@ def apply_off_updates(rows: list) -> tuple:
             row = rows[idx]
             old_status = row.get("Status", "")
             old_notes  = row.get("Notes", "").strip()
-            row["Status"] = "Custom1"
+            row["Status"] = "Custom2"
             row["Notes"]  = f"{old_notes}; OFF" if old_notes else "OFF"
-            changed = [f"Status: {old_status!r} → 'Custom1'",
+            changed = [f"Status: {old_status!r} → 'Custom2'",
                        f"Notes: {old_notes!r} → {row['Notes']!r}"]
+            changed_row_ids.add(id(row))
             entries.append(_make_report_entry(row, "; ".join(changed)))
             matched += 1
 
@@ -474,6 +480,16 @@ def apply_off_updates(rows: list) -> tuple:
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    parser = argparse.ArgumentParser(description="Update territory addresses")
+    parser.add_argument(
+        "--no-overwrite", action="store_true", dest="no_overwrite",
+        help="Skip overwriting TerritoryAddresses.csv; only write TerritoryAddressesChanges.csv",
+    )
+    args = parser.parse_args()
+    overwrite = not args.no_overwrite
+
+    changed_row_ids: set = set()
+
     # --- Load territories ---
     territories = []
     with open(TERRITORIES_CSV, newline="", encoding="utf-8-sig") as f:
@@ -625,6 +641,7 @@ def main():
                             changed_fields.append(f"{col}: {row[col]!r} → {val!r}")
                             row[col] = val
                     if changed_fields:
+                        changed_row_ids.add(id(row))
                         report_entries.append({
                             "ChangeType":        "Updated",
                             "TerritoryID":       tid,
@@ -654,6 +671,7 @@ def main():
                         new_row[col] = val
                 existing_rows.append(new_row)
                 existing_index.setdefault(match_key, []).append(new_row)
+                changed_row_ids.add(id(new_row))
                 report_entries.append({
                     "ChangeType":        "Added",
                     "TerritoryID":       tid,
@@ -736,19 +754,30 @@ def main():
     print(f"Duplicate rows removed:       {removed}")
 
     # --- Apply optional enrichment steps ---
-    deduped_rows, persons_entries = apply_persons_notes(deduped_rows)
-    deduped_rows, status_entries  = apply_status_updates(deduped_rows)
-    deduped_rows, off_entries     = apply_off_updates(deduped_rows)
+    deduped_rows, persons_entries = apply_persons_notes(deduped_rows, changed_row_ids)
+    deduped_rows, status_entries  = apply_status_updates(deduped_rows, changed_row_ids)
+    deduped_rows, off_entries     = apply_off_updates(deduped_rows, changed_row_ids)
     report_entries.extend(persons_entries)
     report_entries.extend(status_entries)
     report_entries.extend(off_entries)
 
-    # --- Write updated CSV ---
-    with open(ADDRESSES_CSV, "w", newline="", encoding="utf-8") as f:
+    # --- Write TerritoryAddressesChanges.csv (always) ---
+    changed_rows = [row for row in deduped_rows if id(row) in changed_row_ids]
+    with open(CHANGES_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=addr_columns)
         writer.writeheader()
-        writer.writerows(deduped_rows)
-    print(f"\nWrote {len(deduped_rows)} rows to {ADDRESSES_CSV}")
+        writer.writerows(changed_rows)
+    print(f"\nWrote {len(changed_rows)} changed rows to {CHANGES_CSV}")
+
+    # --- Optionally overwrite TerritoryAddresses.csv ---
+    if overwrite:
+        with open(ADDRESSES_CSV, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=addr_columns)
+            writer.writeheader()
+            writer.writerows(deduped_rows)
+        print(f"Wrote {len(deduped_rows)} rows to {ADDRESSES_CSV}")
+    else:
+        print(f"Skipping overwrite of {ADDRESSES_CSV} (--no-overwrite)")
 
     # --- Write report ---
     report_path = REPORT_CSV.format(datetime.now().strftime("%Y%m%d_%H%M%S"))

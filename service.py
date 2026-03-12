@@ -31,14 +31,17 @@ GET  /query/street?q=...        Search the shapefile for a street name
 """
 
 import asyncio
+import csv
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
 from datetime import datetime
-from typing import Optional
+from pathlib import Path
+from typing import List, Optional
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse
@@ -61,6 +64,7 @@ ADDRESSES_CSV    = os.path.join(NWS_DIR, "TerritoryAddresses.csv")
 PERSONS_CSV      = os.path.join(NWS_DIR, "Persons.csv")
 STATUS_CSV       = os.path.join(NWS_DIR, "Status.csv")
 OFF_FILE         = os.path.join(OFF_DIR, "Address.txt")
+CHANGES_CSV      = os.path.join(NWS_DIR, "TerritoryAddressesChanges.csv")
 UPDATE_SCRIPT    = os.path.join(BASE, "update_territory_addresses.py")
 
 
@@ -132,23 +136,87 @@ class _UpdateState:
         self.started_at: Optional[str] = None
         self.completed_at: Optional[str] = None
         self.report_file: Optional[str] = None
+        self.overwrite: bool = True
+        self.split: bool = False
+        self.split_rows: int = 200
+        self.split_files: List[str] = []
 
 
 _update_state = _UpdateState()
 _update_lock = threading.Lock()
 
 
+_SPLIT_FILE_RE = re.compile(r"^(.+)_(\d+)\.csv$")
+
+
+def _do_split(csv_path: str, max_rows: int) -> List[str]:
+    """Split a CSV file into numbered chunks. Returns list of generated filenames.
+    Removes any pre-existing split files for the same base name first.
+    """
+    p = Path(csv_path)
+    stem_escaped = re.escape(p.stem)
+    # Remove old split files
+    for old in p.parent.glob(f"{p.stem}_*.csv"):
+        if re.match(rf"^{stem_escaped}_\d+\.csv$", old.name):
+            old.unlink()
+    if not p.exists():
+        return []
+    with open(p, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        rows = list(reader)
+    generated = []
+    for idx, start in enumerate(range(0, max(len(rows), 1), max_rows), 1):
+        chunk = rows[start:start + max_rows]
+        out_path = p.parent / f"{p.stem}_{idx}{p.suffix}"
+        with open(out_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(chunk)
+        generated.append(out_path.name)
+    return generated
+
+
+def _clear_all_split_files() -> List[str]:
+    """Remove all split CSV files from NWS_DIR. Returns names of deleted files."""
+    deleted = []
+    if not os.path.isdir(NWS_DIR):
+        return deleted
+    for name in os.listdir(NWS_DIR):
+        if _SPLIT_FILE_RE.match(name):
+            os.remove(os.path.join(NWS_DIR, name))
+            deleted.append(name)
+    return deleted
+
+
 def _run_update_job() -> None:
     """Run update_territory_addresses.py as a subprocess, capture output."""
     try:
+        cmd = [sys.executable, UPDATE_SCRIPT]
+        if not _update_state.overwrite:
+            cmd.append("--no-overwrite")
         result = subprocess.run(
-            [sys.executable, UPDATE_SCRIPT],
+            cmd,
             capture_output=True,
             text=True,
             cwd=BASE,
         )
         _update_state.log = result.stdout + (result.stderr or "")
         _update_state.status = "completed" if result.returncode == 0 else "failed"
+
+        # Run split if requested and update succeeded
+        _update_state.split_files = []
+        if _update_state.split and result.returncode == 0:
+            split_files = []
+            candidates = []
+            if _update_state.overwrite:
+                candidates.append(ADDRESSES_CSV)
+            candidates.append(CHANGES_CSV)
+            for csv_path in candidates:
+                names = _do_split(csv_path, _update_state.split_rows)
+                split_files.extend(names)
+                _update_state.log += f"\nSplit {Path(csv_path).name} into {len(names)} file(s)."
+            _update_state.split_files = split_files
     except Exception as exc:
         _update_state.status = "failed"
         _update_state.log = f"Failed to start update process: {exc}"
@@ -369,7 +437,12 @@ def upload_status(_user: str = Depends(authenticate)):
 # Update
 # ---------------------------------------------------------------------------
 @app.post("/update", summary="Start the territory address update job")
-def trigger_update(_user: str = Depends(authenticate)):
+def trigger_update(
+    overwrite: bool = True,
+    split: bool = False,
+    split_rows: int = 200,
+    _user: str = Depends(authenticate),
+):
     missing = []
     if not _find_shapefile():
         missing.append("shapefile")
@@ -386,11 +459,18 @@ def trigger_update(_user: str = Depends(authenticate)):
     if not _update_lock.acquire(blocking=False):
         raise HTTPException(status_code=409, detail="An update is already running")
 
+    if split and split_rows < 1:
+        raise HTTPException(status_code=400, detail="split_rows must be a positive integer")
+
     _update_state.status      = "running"
     _update_state.log         = ""
     _update_state.started_at  = datetime.now().isoformat()
     _update_state.completed_at = None
     _update_state.report_file  = None
+    _update_state.split_files  = []
+    _update_state.overwrite    = overwrite
+    _update_state.split        = split
+    _update_state.split_rows   = split_rows
 
     threading.Thread(target=_run_update_job, daemon=True).start()
 
@@ -404,6 +484,7 @@ def get_update_status(_user: str = Depends(authenticate)):
         "started_at":   _update_state.started_at,
         "completed_at": _update_state.completed_at,
         "report_file":  _update_state.report_file,
+        "split_files":  _update_state.split_files,
         "log":          _update_state.log,
     }
 
@@ -455,6 +536,27 @@ def download_addresses(_user: str = Depends(authenticate)):
     )
 
 
+@app.get("/download/split/{filename}", summary="Download a split CSV file")
+def download_split_file(filename: str, _user: str = Depends(authenticate)):
+    if not _SPLIT_FILE_RE.match(filename) or not filename.endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = os.path.join(NWS_DIR, filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path, media_type="text/csv", filename=filename)
+
+
+@app.get("/download/changes", summary="Download TerritoryAddressesChanges.csv")
+def download_changes(_user: str = Depends(authenticate)):
+    if not os.path.exists(CHANGES_CSV):
+        raise HTTPException(status_code=404, detail="TerritoryAddressesChanges.csv not found — run an update first")
+    return FileResponse(
+        CHANGES_CSV,
+        media_type="text/csv",
+        filename="TerritoryAddressesChanges.csv",
+    )
+
+
 @app.get("/download/report", summary="Download the latest update report CSV")
 def download_report(_user: str = Depends(authenticate)):
     if not _update_state.report_file:
@@ -476,15 +578,15 @@ def delete_files(_user: str = Depends(authenticate)):
     deleted = []
 
     shapefile_path = _find_shapefile()
-    for path in filter(None, [shapefile_path, TERRITORIES_CSV, ADDRESSES_CSV, PERSONS_CSV, STATUS_CSV, OFF_FILE]):
+    for path in filter(None, [shapefile_path, TERRITORIES_CSV, ADDRESSES_CSV, PERSONS_CSV, STATUS_CSV, OFF_FILE, CHANGES_CSV]):
         if os.path.exists(path):
             os.remove(path)
             deleted.append(os.path.basename(path))
 
-    # Remove all report files
+    # Remove all report and split files
     if os.path.isdir(NWS_DIR):
         for name in os.listdir(NWS_DIR):
-            if name.startswith("update_report_"):
+            if name.startswith("update_report_") or _SPLIT_FILE_RE.match(name):
                 os.remove(os.path.join(NWS_DIR, name))
                 deleted.append(name)
 
@@ -493,5 +595,6 @@ def delete_files(_user: str = Depends(authenticate)):
     _update_state.started_at  = None
     _update_state.completed_at = None
     _update_state.report_file  = None
+    _update_state.split_files  = []
 
     return {"message": "Files deleted", "deleted": deleted}
