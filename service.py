@@ -598,3 +598,32 @@ def delete_files(_user: str = Depends(authenticate)):
     _update_state.split_files  = []
 
     return {"message": "Files deleted", "deleted": deleted}
+
+
+# ---------------------------------------------------------------------------
+# Delete a single file
+# ---------------------------------------------------------------------------
+@app.delete("/files/{file_key}", summary="Delete a single uploaded file")
+def delete_file(file_key: str, _user: str = Depends(authenticate)):
+    if _update_state.status == "running":
+        raise HTTPException(status_code=409, detail="Cannot delete files while an update is running")
+
+    file_map = {
+        "shapefile":   _find_shapefile(),
+        "territories": TERRITORIES_CSV,
+        "addresses":   ADDRESSES_CSV,
+        "persons":     PERSONS_CSV,
+        "status":      STATUS_CSV,
+        "off":         OFF_FILE,
+    }
+
+    if file_key not in file_map:
+        raise HTTPException(status_code=404, detail=f"Unknown file key: {file_key!r}")
+
+    path = file_map[file_key]
+    if not path or not os.path.exists(path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    name = os.path.basename(path)
+    os.remove(path)
+    return {"message": "File deleted", "deleted": name}

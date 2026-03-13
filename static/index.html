@@ -183,9 +183,10 @@
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
           <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
             <span class="text-xl">📦</span>
-            <div>
+            <div class="flex-1">
               <div class="text-white font-semibold text-sm">Parcel Shapefile</div>
               <div class="text-slate-400 text-xs">.zip archive</div>
+              <span class="inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-red-500 text-white">Required</span>
             </div>
           </div>
           <div class="p-4 flex-1 flex flex-col gap-3">
@@ -210,9 +211,10 @@
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
           <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
             <span class="text-xl">📋</span>
-            <div>
+            <div class="flex-1">
               <div class="text-white font-semibold text-sm">Territories</div>
               <div class="text-slate-400 text-xs">Territories.csv</div>
+              <span class="inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-red-500 text-white">Required</span>
             </div>
           </div>
           <div class="p-4 flex-1 flex flex-col gap-3">
@@ -237,9 +239,10 @@
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
           <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
             <span class="text-xl">📍</span>
-            <div>
+            <div class="flex-1">
               <div class="text-white font-semibold text-sm">Territory Addresses</div>
               <div class="text-slate-400 text-xs">TerritoryAddresses.csv</div>
+              <span class="inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-red-500 text-white">Required</span>
             </div>
           </div>
           <div class="p-4 flex-1 flex flex-col gap-3">
@@ -264,9 +267,10 @@
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
           <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
             <span class="text-xl">👥</span>
-            <div>
+            <div class="flex-1">
               <div class="text-white font-semibold text-sm">Persons</div>
               <div class="text-slate-400 text-xs">Persons.csv</div>
+              <span class="inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-500 text-white">Optional</span>
             </div>
           </div>
           <div class="p-4 flex-1 flex flex-col gap-3">
@@ -291,9 +295,10 @@
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
           <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
             <span class="text-xl">🏷️</span>
-            <div>
+            <div class="flex-1">
               <div class="text-white font-semibold text-sm">Status</div>
               <div class="text-slate-400 text-xs">Status.csv</div>
+              <span class="inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-500 text-white">Optional</span>
             </div>
           </div>
           <div class="p-4 flex-1 flex flex-col gap-3">
@@ -318,9 +323,10 @@
         <div class="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden flex flex-col">
           <div class="bg-slate-800 px-5 py-3.5 flex items-center gap-3">
             <span class="text-xl">👮</span>
-            <div>
+            <div class="flex-1">
               <div class="text-white font-semibold text-sm">OFF Addresses</div>
               <div class="text-slate-400 text-xs">Address.txt</div>
+              <span class="inline-block mt-1 text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-500 text-white">Optional</span>
             </div>
           </div>
           <div class="p-4 flex-1 flex flex-col gap-3">
@@ -722,21 +728,42 @@ async function loadDashboard() {
 async function loadFiles() {
   try {
     const st = await apiJson('GET', '/upload/status');
-    renderFileStat('fs-shapefile',    st.shapefile);
-    renderFileStat('fs-territories',  st.territories_csv);
-    renderFileStat('fs-addresses',    st.addresses_csv);
-    renderFileStat('fs-persons',      st.persons_csv);
-    renderFileStat('fs-status',       st.status_csv);
-    renderFileStat('fs-off',          st.off_file);
+    renderFileStat('fs-shapefile',    st.shapefile,       'shapefile');
+    renderFileStat('fs-territories',  st.territories_csv, 'territories');
+    renderFileStat('fs-addresses',    st.addresses_csv,   'addresses');
+    renderFileStat('fs-persons',      st.persons_csv,     'persons');
+    renderFileStat('fs-status',       st.status_csv,      'status');
+    renderFileStat('fs-off',          st.off_file,        'off');
   } catch (_) {}
 }
 
-function renderFileStat(id, info) {
+function renderFileStat(id, info, fileKey) {
   document.getElementById(id).innerHTML = info.present
-    ? `<span class="text-emerald-600 font-semibold">✓ Uploaded</span>
-       <span class="text-gray-300 mx-1">·</span>${fmtBytes(info.bytes)}
-       <span class="text-gray-300 mx-1">·</span><span class="text-gray-400">${fmtDate(info.modified)}</span>`
+    ? `<div class="flex items-center justify-between gap-2">
+         <div>
+           <span class="text-emerald-600 font-semibold">✓ Uploaded</span>
+           <span class="text-gray-300 mx-1">·</span>${fmtBytes(info.bytes)}
+           <span class="text-gray-300 mx-1">·</span><span class="text-gray-400">${fmtDate(info.modified)}</span>
+         </div>
+         <button onclick="deleteFile('${fileKey}')" title="Delete file"
+           class="flex-shrink-0 text-red-400 hover:text-red-600 transition-colors">
+           <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+         </button>
+       </div>`
     : '<span class="text-gray-400">Not uploaded</span>';
+}
+
+async function deleteFile(fileKey) {
+  const labels = { shapefile: 'Parcel Shapefile', territories: 'Territories.csv',
+                   addresses: 'TerritoryAddresses.csv', persons: 'Persons.csv',
+                   status: 'Status.csv', off: 'Address.txt' };
+  if (!await showConfirm('Delete File', `Permanently delete ${labels[fileKey] ?? fileKey}?`)) return;
+  try {
+    const d = await apiJson('DELETE', `/files/${fileKey}`);
+    toast(`Deleted: ${d.deleted}`, 'info');
+    loadFiles();
+    loadDashboard();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 /* Drag-and-drop wiring */
