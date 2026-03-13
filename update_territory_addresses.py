@@ -305,8 +305,14 @@ def apply_persons_notes(rows: list, changed_row_ids: set) -> tuple:
 
     entries = []
     matched = 0
+    skipped_moved = 0
+    skipped_apt = 0
     for person in persons:
-        address  = person.get("Address", "").strip()
+        if person.get("Moved", "").strip().lower() == "true":
+            skipped_moved += 1
+            continue
+
+        address   = person.get("Address", "").strip()
         last_name = person.get("LastName", "").strip()
         if not address or not last_name:
             continue
@@ -319,19 +325,33 @@ def apply_persons_notes(rows: list, changed_row_ids: set) -> tuple:
         if key not in addr_index:
             continue
 
-        for idx in addr_index[key]:
-            row = rows[idx]
+        # Collect all rows that match this person's address.
+        matched_rows = [
+            rows[idx] for idx in addr_index[key]
             if _person_matches_address(address,
-                                       row.get("Number", ""),
-                                       row.get("Street", ""),
-                                       row.get("PostalCode", "")):
-                old_notes = row.get("Notes", "")
-                new_notes = f"{last_name} Home"
-                row["Notes"] = new_notes
-                changed_row_ids.add(id(row))
-                entries.append(_make_report_entry(
-                    row, f"Notes: {old_notes!r} → {new_notes!r}"))
-                matched += 1
+                                       rows[idx].get("Number", ""),
+                                       rows[idx].get("Street", ""),
+                                       rows[idx].get("PostalCode", ""))
+        ]
+
+        # Skip if the address has multiple apartment units.
+        if sum(1 for r in matched_rows if r.get("ApartmentNumber", "").strip()) > 1:
+            skipped_apt += 1
+            continue
+
+        for row in matched_rows:
+            old_notes = row.get("Notes", "")
+            new_notes = f"{last_name} Home"
+            row["Notes"] = new_notes
+            changed_row_ids.add(id(row))
+            entries.append(_make_report_entry(
+                row, f"Notes: {old_notes!r} → {new_notes!r}"))
+            matched += 1
+
+    if skipped_moved:
+        print(f"Skipped {skipped_moved} person(s) marked as Moved.")
+    if skipped_apt:
+        print(f"Skipped {skipped_apt} person(s) at multi-apartment addresses.")
 
     print(f"Applied persons notes to {matched} address row(s).")
     return rows, entries
@@ -629,7 +649,7 @@ def main():
             lat_str = f"{lat:.6f}"
             lon_str = f"{lon:.6f}"
 
-            # Shape-authoritative field values mapped to CSV column names
+            # Authoritative field values mapped to CSV column names
             shape_values = {
                 "Number":          situs_num,
                 "Street":          street,
@@ -639,6 +659,8 @@ def main():
                 "ApartmentNumber": apt_num,
                 "Latitude":        lat_str,
                 "Longitude":       lon_str,
+                "CategoryCode":    matched_territory["CategoryCode"],
+                "Category":        matched_territory["Category"],
             }
 
             match_key = addr_match_key(tid, situs_num, street, situs_city, situs_zip, situs_stat, apt_num)
@@ -676,8 +698,6 @@ def main():
                 new_row = {col: "" for col in addr_columns}
                 new_row["TerritoryID"]     = tid
                 new_row["TerritoryNumber"] = matched_territory["TerritoryNumber"]
-                new_row["CategoryCode"]    = matched_territory["CategoryCode"]
-                new_row["Category"]        = matched_territory["Category"]
                 for col, val in shape_values.items():
                     if col in new_row:
                         new_row[col] = val
