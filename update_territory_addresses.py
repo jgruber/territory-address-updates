@@ -756,32 +756,42 @@ def main():
             seen_keys[k] = row
             deduped_rows.append(row)
         else:
-            # Keep whichever row scores higher; demote the lower-scoring one
-            incumbent = seen_keys[k]
-            if row_score(row) > row_score(incumbent):
-                # New row is better — swap it in, report the incumbent as removed
-                deduped_rows[deduped_rows.index(incumbent)] = row
-                seen_keys[k] = row
-                evicted = incumbent
+            # Rows with a non-empty ApartmentNumber are never removed — they are
+            # individually tracked units that must be preserved across updates.
+            # Only apply score-based deduplication to rows without an apartment number.
+            has_apt = bool(norm_str(row.get("ApartmentNumber", "")))
+            if has_apt:
+                deduped_rows.append(row)
+                incumbent = seen_keys[k]
+                if row_score(row) > row_score(incumbent):
+                    seen_keys[k] = row
             else:
-                evicted = row
-            report_entries.append({
-                "ChangeType":         "Removed",
-                "TerritoryID":        evicted.get("TerritoryID", ""),
-                "TerritoryNumber":    evicted.get("TerritoryNumber", ""),
-                "CategoryCode":       evicted.get("CategoryCode", ""),
-                "TerritoryAddressID": evicted.get("TerritoryAddressID", ""),
-                "ApartmentNumber":    evicted.get("ApartmentNumber", ""),
-                "Number":             evicted.get("Number", ""),
-                "Street":             evicted.get("Street", ""),
-                "Suburb":             evicted.get("Suburb", ""),
-                "PostalCode":         evicted.get("PostalCode", ""),
-                "State":              evicted.get("State", ""),
-                "Latitude":           evicted.get("Latitude", ""),
-                "Longitude":          evicted.get("Longitude", ""),
-                "ChangedFields":      "",
-            })
-            removed += 1
+                # Keep whichever non-apartment row scores higher; demote the other
+                incumbent = seen_keys[k]
+                if row_score(row) > row_score(incumbent):
+                    # New row is better — swap it in, report the incumbent as removed
+                    deduped_rows[deduped_rows.index(incumbent)] = row
+                    seen_keys[k] = row
+                    evicted = incumbent
+                else:
+                    evicted = row
+                report_entries.append({
+                    "ChangeType":         "Removed",
+                    "TerritoryID":        evicted.get("TerritoryID", ""),
+                    "TerritoryNumber":    evicted.get("TerritoryNumber", ""),
+                    "CategoryCode":       evicted.get("CategoryCode", ""),
+                    "TerritoryAddressID": evicted.get("TerritoryAddressID", ""),
+                    "ApartmentNumber":    evicted.get("ApartmentNumber", ""),
+                    "Number":             evicted.get("Number", ""),
+                    "Street":             evicted.get("Street", ""),
+                    "Suburb":             evicted.get("Suburb", ""),
+                    "PostalCode":         evicted.get("PostalCode", ""),
+                    "State":              evicted.get("State", ""),
+                    "Latitude":           evicted.get("Latitude", ""),
+                    "Longitude":          evicted.get("Longitude", ""),
+                    "ChangedFields":      "",
+                })
+                removed += 1
 
     print(f"Duplicate rows removed:       {removed}")
 
