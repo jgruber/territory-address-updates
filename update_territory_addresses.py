@@ -530,6 +530,9 @@ def main():
             if not poly:
                 print(f"  [warn] Territory {row['TerritoryID']} ({row.get('Category', '')} {row.get('Number', '')}) has no parseable boundary, skipping.")
                 continue
+            if row.get("CategoryCode", "").strip() == "B" or row.get("Category", "").strip() == "Business":
+                print(f"  [skip] Territory {row['TerritoryID']} ({row.get('Category', '')} {row.get('Number', '')}) is a Business territory, skipping.")
+                continue
             territories.append({
                 "TerritoryID": row["TerritoryID"],
                 "TerritoryNumber": row.get("Number", ""),
